@@ -150,6 +150,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       detections,
       frame_results: detection.frame_results || [],
       elapsed_seconds: detection.elapsed_seconds,
+      drone_gps: detection.drone_gps || null,   // {lat, lon, alt} from EXIF, or null
+      image_size: detection.image_size || null, // [width, height]
       feedback_accurate: null,
       feedback_comment: null,
     };

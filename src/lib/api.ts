@@ -62,6 +62,31 @@ export interface DroneAPI {
   prediction_count?: number;
 }
 
+export interface DetectionGPS {
+  lat: number;
+  lon: number;
+  google_maps_url: string;
+  dx_meters: number;
+  dy_meters: number;
+}
+
+export interface DroneGPS {
+  lat: number;
+  lon: number;
+  alt: number | null;
+}
+
+export interface Detection {
+  label: string;
+  confidence: number;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  center_px?: [number, number];
+  gps?: DetectionGPS;      // only if drone has GPS EXIF
+}
+
 export interface PredictionAPI {
   id: number;
   drone_id: number;
@@ -73,9 +98,11 @@ export interface PredictionAPI {
   video_url: string | null;   // legacy alias for file_url
   result_url: string | null;  // annotated output from YOLO
   has_result: boolean;
-  detections: { label: string; confidence: number; x: number; y: number; width?: number; height?: number }[];
+  detections: Detection[];
   frame_results?: { frame: number; detections: unknown[] }[];
   elapsed_seconds?: number;
+  drone_gps?: DroneGPS | null;    // GPS position of drone at capture time
+  image_size?: [number, number];  // [width, height] pixels
   feedback_accurate: boolean | null;
   feedback_comment: string | null;
   // admin fields

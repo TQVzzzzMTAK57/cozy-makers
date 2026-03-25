@@ -35,6 +35,107 @@ def load_model():
     return YOLO(MODEL_PATH)
 
 
+# ── GPS helpers ────────────────────────────────────────────────────────────────
+def _dms_to_decimal(dms, ref):
+    """Convert EXIF DMS tuple to decimal degrees."""
+    d, m, s = float(dms[0]), float(dms[1]), float(dms[2])
+    dd = d + m / 60.0 + s / 3600.0
+    if ref in ('S', 'W'):
+        dd = -dd
+    return round(dd, 8)
+
+
+def extract_gps_exif(image_path: str):
+    """
+    Extract GPS info from image EXIF.
+    Returns dict {lat, lon, alt} or None if no GPS data found.
+    """
+    try:
+        from PIL import Image
+        from PIL.ExifTags import TAGS, GPSTAGS
+
+        img = Image.open(image_path)
+        exif_raw = img._getexif()  # type: ignore[attr-defined]
+        if not exif_raw:
+            return None
+
+        exif = {TAGS.get(k, k): v for k, v in exif_raw.items()}
+        gps_info_raw = exif.get("GPSInfo")
+        if not gps_info_raw:
+            return None
+
+        gps = {GPSTAGS.get(k, k): v for k, v in gps_info_raw.items()}
+
+        lat = _dms_to_decimal(gps["GPSLatitude"], gps["GPSLatitudeRef"])
+        lon = _dms_to_decimal(gps["GPSLongitude"], gps["GPSLongitudeRef"])
+
+        alt = None
+        if "GPSAltitude" in gps:
+            alt = round(float(gps["GPSAltitude"]), 2)
+            ref = gps.get("GPSAltitudeRef", 0)
+            if ref == 1:   # below sea level
+                alt = -alt
+
+        return {"lat": lat, "lon": lon, "alt": alt}
+
+    except Exception:
+        return None
+
+
+def pixel_to_gps(drone_gps: dict, img_w: int, img_h: int,
+                 px: float, py: float,
+                 fov_h: float = 84.0, fov_v: float = 48.8) -> dict | None:
+    """
+    Convert pixel center (px, py) to GPS coordinate.
+
+    Assumptions:
+      - Drone is at drone_gps {lat, lon, alt} looking straight down
+      - Camera FOV: horizontal 84°, vertical 48.8° (DJI Mavic-class default)
+      - Flat terrain (no DEM correction)
+
+    Parameters:
+        drone_gps : {lat, lon, alt (meters AGL)}
+        img_w/h   : image pixel dimensions
+        px/py     : pixel coordinates of object center
+        fov_h/v   : camera horizontal/vertical FOV in degrees
+    """
+    import math
+
+    alt = drone_gps.get("alt")
+    if alt is None or alt <= 0:
+        return None   # can't compute without altitude
+
+    lat0 = drone_gps["lat"]
+    lon0 = drone_gps["lon"]
+
+    # Ground footprint at given altitude
+    ground_w = 2 * alt * math.tan(math.radians(fov_h / 2))   # metres
+    ground_h = 2 * alt * math.tan(math.radians(fov_v / 2))   # metres
+
+    # Metres per pixel
+    mpp_x = ground_w / img_w
+    mpp_y = ground_h / img_h
+
+    # Pixel offset from image center (positive x → east, positive y → north)
+    dx_m = (px - img_w / 2) * mpp_x
+    dy_m = (img_h / 2 - py) * mpp_y   # y-axis flipped (image top = north)
+
+    # Convert metres offset to degrees
+    lat_deg_per_m = 1.0 / 111_320.0
+    lon_deg_per_m = 1.0 / (111_320.0 * math.cos(math.radians(lat0)))
+
+    obj_lat = round(lat0 + dy_m * lat_deg_per_m, 8)
+    obj_lon = round(lon0 + dx_m * lon_deg_per_m, 8)
+
+    return {
+        "lat": obj_lat,
+        "lon": obj_lon,
+        "google_maps_url": f"https://www.google.com/maps?q={obj_lat},{obj_lon}",
+        "dx_meters": round(dx_m, 1),
+        "dy_meters": round(dy_m, 1),
+    }
+
+
 # ── image inference ────────────────────────────────────────────────────────────
 def detect_image(model, input_path: str, output_path: str, conf: float):
     results = model.predict(source=input_path, conf=conf, verbose=False)
@@ -44,6 +145,12 @@ def detect_image(model, input_path: str, output_path: str, conf: float):
     annotated = result.plot()
     cv2.imwrite(output_path, annotated)
 
+    # Image dimensions
+    img_h, img_w = annotated.shape[:2]
+
+    # Extract GPS from EXIF
+    drone_gps = extract_gps_exif(input_path)
+
     detections = []
     boxes = result.boxes
     if boxes is not None:
@@ -52,20 +159,36 @@ def detect_image(model, input_path: str, output_path: str, conf: float):
             label = model.names.get(cls_id, str(cls_id))
             confidence = float(box.conf[0])
             xyxy = box.xyxy[0].tolist()
-            detections.append({
-                "label": label,
+
+            # Centre of bounding box
+            cx = (xyxy[0] + xyxy[2]) / 2
+            cy = (xyxy[1] + xyxy[3]) / 2
+
+            det: dict = {
+                "label":      label,
                 "confidence": round(confidence, 4),
-                "x": round(xyxy[0]),
-                "y": round(xyxy[1]),
-                "width": round(xyxy[2] - xyxy[0]),
-                "height": round(xyxy[3] - xyxy[1]),
-            })
+                "x":          round(xyxy[0]),
+                "y":          round(xyxy[1]),
+                "width":      round(xyxy[2] - xyxy[0]),
+                "height":     round(xyxy[3] - xyxy[1]),
+                "center_px":  [round(cx), round(cy)],
+            }
+
+            # GPS coordinate of this detection
+            if drone_gps:
+                gps_coord = pixel_to_gps(drone_gps, img_w, img_h, cx, cy)
+                if gps_coord:
+                    det["gps"] = gps_coord
+
+            detections.append(det)
 
     return {
-        "type": "image",
-        "detections": detections,
-        "output_path": output_path,
+        "type":             "image",
+        "detections":       detections,
+        "output_path":      output_path,
         "total_detections": len(detections),
+        "drone_gps":        drone_gps,   # None if no EXIF, else {lat, lon, alt}
+        "image_size":       [img_w, img_h],
     }
 
 

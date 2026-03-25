@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Download, Upload, ThumbsUp, ThumbsDown, ChevronLeft, Target, CheckCircle, Clock, SlidersHorizontal, ZoomIn, X, Maximize2 } from "lucide-react";
+import { Download, Upload, ThumbsUp, ThumbsDown, ChevronLeft, Target, CheckCircle, Clock, SlidersHorizontal, ZoomIn, X, Maximize2, MapPin, Navigation, ExternalLink, Satellite } from "lucide-react";
 import { api, type PredictionAPI } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -356,9 +356,43 @@ const VideoResult = () => {
                             style={{ width: `${(d.confidence * 100).toFixed(0)}%`, backgroundColor: color }}
                           />
                         </div>
+                        {/* Pixel position */}
                         <p className="text-xs text-muted-foreground">
-                          Position: ({d.x}, {d.y})
+                          Pixel: ({d.x}, {d.y})
+                          {d.center_px && <span className="ml-1 opacity-60">· center ({d.center_px[0]}, {d.center_px[1]})</span>}
                         </p>
+
+                        {/* GPS coordinate */}
+                        {d.gps ? (
+                          <div className="mt-2 rounded-md p-2" style={{ backgroundColor: `${color}18`, border: `1px solid ${color}33` }}>
+                            <div className="flex items-center gap-1 mb-1">
+                              <MapPin className="w-3 h-3" style={{ color }} />
+                              <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color }}>GPS</span>
+                            </div>
+                            <p className="text-xs font-mono font-medium text-foreground">
+                              {d.gps.lat.toFixed(6)}°, {d.gps.lon.toFixed(6)}°
+                            </p>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-[10px] text-muted-foreground">
+                                Δ {d.gps.dx_meters > 0 ? '+' : ''}{d.gps.dx_meters}m E, {d.gps.dy_meters > 0 ? '+' : ''}{d.gps.dy_meters}m N
+                              </span>
+                              <a
+                                href={d.gps.google_maps_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-0.5 text-[10px] underline"
+                                style={{ color }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                Maps <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            </div>
+                          </div>
+                        ) : (
+                          isImageResult && !prediction.drone_gps && (
+                            <p className="text-[10px] text-muted-foreground/60 mt-1 italic">No GPS EXIF</p>
+                          )
+                        )}
                       </div>
                     );
                   })}
@@ -367,6 +401,131 @@ const VideoResult = () => {
             </div>
           );
         })()}
+
+        {/* GPS / Drone Position Panel – only for images with GPS EXIF */}
+        {isImageResult && prediction.drone_gps && (() => {
+          const g = prediction.drone_gps!;
+          const hasGpsDets = prediction.detections.some(d => d.gps);
+          return (
+            <div className="bg-card rounded-xl border shadow-sm p-6 mb-6 animate-fade-in" style={{ borderColor: '#22d3ee44', background: 'linear-gradient(135deg,rgb(6 182 212 / 5%) 0%,transparent 100%)' }}>
+              {/* Header */}
+              <div className="flex items-center gap-2 mb-4">
+                <div className="p-2 rounded-lg" style={{ background: '#06b6d420' }}>
+                  <Satellite className="w-4 h-4" style={{ color: '#06b6d4' }} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm" style={{ color: '#06b6d4' }}>GPS Coordinate Data</h3>
+                  <p className="text-xs text-muted-foreground">Extracted from drone image EXIF metadata</p>
+                </div>
+              </div>
+
+              {/* Drone position */}
+              <div className="rounded-lg border p-4 mb-4" style={{ borderColor: '#06b6d433', backgroundColor: '#06b6d408' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <Navigation className="w-4 h-4" style={{ color: '#06b6d4' }} />
+                  <span className="text-sm font-semibold">Drone Position (Image Centre)</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Latitude</p>
+                    <p className="font-mono font-semibold">{g.lat.toFixed(6)}°</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-0.5">Longitude</p>
+                    <p className="font-mono font-semibold">{g.lon.toFixed(6)}°</p>
+                  </div>
+                  {g.alt != null && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-0.5">Altitude (AGL)</p>
+                      <p className="font-mono font-semibold">{g.alt} m</p>
+                    </div>
+                  )}
+                </div>
+                <a
+                  href={`https://www.google.com/maps?q=${g.lat},${g.lon}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 mt-3 text-xs underline"
+                  style={{ color: '#06b6d4' }}
+                >
+                  <MapPin className="w-3 h-3" /> View drone location on Google Maps <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              {/* Per-detection GPS table */}
+              {hasGpsDets && (
+                <>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Detected Object Coordinates</h4>
+                  <div className="overflow-x-auto rounded-lg border" style={{ borderColor: '#06b6d422' }}>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr style={{ backgroundColor: '#06b6d410' }}>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">#</th>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Object</th>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Conf.</th>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Latitude</th>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Longitude</th>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Offset (E/N)</th>
+                          <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Map</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prediction.detections
+                          .filter(d => d.gps)
+                          .map((d, i) => {
+                            const color = LABEL_COLORS[d.label] || '#6366f1';
+                            return (
+                              <tr key={i} className="border-t" style={{ borderColor: '#06b6d411' }}>
+                                <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
+                                <td className="px-3 py-2">
+                                  <span className="flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                                    <span className="capitalize font-medium" style={{ color }}>{d.label.replace(/_/g, ' ')}</span>
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 font-mono">{(d.confidence * 100).toFixed(1)}%</td>
+                                <td className="px-3 py-2 font-mono">{d.gps!.lat.toFixed(6)}°</td>
+                                <td className="px-3 py-2 font-mono">{d.gps!.lon.toFixed(6)}°</td>
+                                <td className="px-3 py-2 font-mono text-muted-foreground">
+                                  {d.gps!.dx_meters > 0 ? '+' : ''}{d.gps!.dx_meters}m / {d.gps!.dy_meters > 0 ? '+' : ''}{d.gps!.dy_meters}m
+                                </td>
+                                <td className="px-3 py-2">
+                                  <a
+                                    href={d.gps!.google_maps_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-cyan-500 hover:text-cyan-400 transition-colors"
+                                  >
+                                    <MapPin className="w-3 h-3" /><ExternalLink className="w-2.5 h-2.5" />
+                                  </a>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {g.alt == null && (
+                    <p className="text-[11px] text-amber-500 mt-2 flex items-center gap-1">
+                      ⚠️ Altitude not found in EXIF — GPS coordinates estimated using default 50m AGL. For accuracy, ensure drone altitude is embedded in image metadata.
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* No-GPS notice for images without EXIF */}
+        {isImageResult && !prediction.drone_gps && prediction.detections.length > 0 && (
+          <div className="rounded-xl border border-dashed border-muted p-4 mb-6 flex items-start gap-3 text-sm text-muted-foreground">
+            <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0 opacity-40" />
+            <div>
+              <p className="font-medium text-foreground/70">GPS coordinates not available</p>
+              <p className="text-xs mt-0.5">This image does not contain GPS EXIF metadata. To enable coordinate tracking, ensure your drone embeds GPS data in captured images.</p>
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex gap-3 justify-center mb-6">
