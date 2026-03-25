@@ -22,3 +22,16 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ── Uploads (user data) ───────────────────────────────────────────────────────
+server/uploads/
+!server/uploads/.gitkeep
+
+# ── ML model weights (large binary) ──────────────────────────────────────────
+detect/*.pt
+detect/*.pth
+detect/*.weights
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+user.txt
+server/data.json

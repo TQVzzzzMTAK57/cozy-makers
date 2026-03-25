@@ -1,115 +1,247 @@
 import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Upload, Film, CloudUpload } from "lucide-react";
-import { addPrediction } from "@/lib/drone-store";
+import { Upload, Film, Image, CloudUpload, ChevronLeft, CheckCircle, X, Settings2 } from "lucide-react";
+import { api } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import AppFooter from "@/components/AppFooter";
+
+const IMAGE_TYPES = new Set([
+  'image/jpeg', 'image/jpg', 'image/png', 'image/bmp', 'image/gif', 'image/webp',
+]);
+const VIDEO_TYPES = /^video\//;
+
+function isImage(file: File) { return IMAGE_TYPES.has(file.type); }
+function isVideo(file: File) { return VIDEO_TYPES.test(file.type); }
+function isAccepted(file: File) { return isImage(file) || isVideo(file); }
 
 const UploadVideo = () => {
   const { droneId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [fileKind, setFileKind] = useState<'image' | 'video' | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [done, setDone] = useState(false);
+  const [conf, setConf] = useState(0.25);
+  const [showConf, setShowConf] = useState(false);
 
   if (!isAuthenticated()) { navigate("/login"); return null; }
 
   const handleFileSelect = (file: File) => {
-    if (file.type.startsWith('video/')) {
-      setSelectedFile(file);
-    } else {
-      toast({ title: "Invalid file", description: "Please select a video file", variant: "destructive" });
+    if (!isAccepted(file)) {
+      toast({
+        title: "File không hợp lệ",
+        description: "Vui lòng chọn ảnh (jpg, png, webp…) hoặc video (mp4, avi, mov…)",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setFileKind(isImage(file) ? 'image' : 'video');
+  };
+
+  const clearFile = () => {
+    setSelectedFile(null);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setFileKind(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || !droneId) return;
+    setProcessing(true);
+    setProgress(0);
+    try {
+      await api.predictions.upload(
+        Number(droneId),
+        selectedFile,
+        (pct) => setProgress(Math.min(pct, fileKind === 'image' ? 70 : 85)),
+        conf,
+      );
+      setProgress(100);
+      setDone(true);
+      toast({ title: "✅ Phân tích hoàn tất!", description: "YOLO đã phát hiện đối tượng thành công." });
+      setTimeout(() => navigate(`/predictions/${droneId}`), 1500);
+    } catch (err: unknown) {
+      toast({ title: "Upload thất bại", description: err instanceof Error ? err.message : "Lỗi không xác định", variant: "destructive" });
+      setProcessing(false);
+      setProgress(0);
     }
   };
 
-  const handleUpload = () => {
-    if (!selectedFile) return;
-    setProcessing(true);
-    setTimeout(() => {
-      const now = new Date();
-      addPrediction({
-        droneId: Number(droneId),
-        name: selectedFile.name,
-        uploadedAt: `${now.toLocaleTimeString()} ${now.toLocaleDateString()}`,
-        videoUrl: URL.createObjectURL(selectedFile),
-        hasResult: true,
-        result: {
-          detections: [
-            { label: "swimmer", confidence: 0.66, x: 350, y: 220 },
-            { label: "boat", confidence: 0.73, x: 50, y: 30 },
-          ],
-        },
-      });
-      toast({ title: "✅ Success", description: "Video processed! Swimmer detected." });
-      setProcessing(false);
-      navigate(`/predictions/${droneId}`);
-    }, 3000);
-  };
+  const labelForKind = fileKind === 'image' ? 'ảnh' : 'video';
 
   return (
-    <div className="min-h-screen bg-primary/10 p-6">
-      <div className="container mx-auto max-w-3xl">
-        <Button variant="outline" size="sm" className="rounded-full mb-6" onClick={() => navigate(-1)}>← Back</Button>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
+      <div className="container mx-auto max-w-2xl">
+        <Button variant="outline" size="sm" className="rounded-full mb-6 gap-1" onClick={() => navigate(-1)}>
+          <ChevronLeft className="w-4 h-4" /> Back
+        </Button>
 
-        <div className="bg-primary text-primary-foreground rounded-t-xl p-8 text-center">
-          <h1 className="text-2xl font-bold">Upload Your Video</h1>
-          <p className="text-sm opacity-80 mt-1">Select a video file to upload and analyze for drowning detection</p>
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary to-indigo-600 text-white rounded-t-2xl p-8 text-center">
+          <CloudUpload className="w-12 h-12 mx-auto mb-3 opacity-90" />
+          <h1 className="text-2xl font-bold">Phân tích Ảnh / Video</h1>
+          <p className="text-sm opacity-75 mt-1">AI sẽ phát hiện người đuối nước bằng mô hình <strong>best4.pt</strong></p>
         </div>
 
-        <div className="bg-card rounded-b-xl border border-t-0 shadow-sm p-8">
-          {processing ? (
-            <div className="text-center py-12">
-              <div className="animate-spin w-12 h-12 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-              <p className="font-semibold text-lg">Video is being processed!</p>
-              <p className="text-sm text-muted-foreground mt-1">Please wait while AI analyzes your video...</p>
-            </div>
-          ) : (
-            <>
-              <div
-                className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors cursor-pointer ${
-                  dragOver ? 'border-primary bg-accent' : 'border-border hover:border-primary/50'
-                }`}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                onDragLeave={() => setDragOver(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDragOver(false);
-                  if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <Film className="w-16 h-16 text-primary/40 mx-auto mb-4" />
-                <p className="font-medium mb-2">Drag & drop your video here</p>
-                <p className="text-sm text-muted-foreground mb-4">or click to browse</p>
-                <div className="flex gap-3 justify-center">
-                  <Button size="sm" variant="outline" className="rounded-full">
-                    <Upload className="w-4 h-4 mr-1" /> Browse Files
-                  </Button>
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*"
-                  className="hidden"
-                  onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
-                />
-              </div>
+        <div className="bg-card rounded-b-2xl border border-t-0 shadow-sm p-8">
 
-              {selectedFile && (
-                <div className="mt-4 p-4 bg-accent rounded-lg">
-                  <p className="text-sm">Selected file: <span className="font-medium">{selectedFile.name}</span></p>
+          {/* Processing State */}
+          {processing && (
+            <div className="text-center py-8 animate-fade-in">
+              {done ? (
+                <div className="space-y-3">
+                  <CheckCircle className="w-16 h-16 text-green-500 mx-auto animate-bounce" />
+                  <p className="font-bold text-lg text-green-700">Phân tích hoàn tất!</p>
+                  <p className="text-sm text-muted-foreground">Đang chuyển đến kết quả…</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="relative w-20 h-20 mx-auto">
+                    <div className="w-20 h-20 border-4 border-primary/20 rounded-full absolute" />
+                    <div className="w-20 h-20 border-4 border-primary border-t-transparent rounded-full animate-spin absolute" />
+                    <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-primary">{progress}%</span>
+                  </div>
+                  <div>
+                    <p className="font-semibold text-lg">
+                      {progress < (fileKind === 'image' ? 70 : 85)
+                        ? `Đang tải ${labelForKind}…`
+                        : 'AI đang phân tích…'}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">Vui lòng không đóng trang này</p>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div
+                      className="bg-gradient-to-r from-primary to-indigo-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{progress}% hoàn tất</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* File selection */}
+          {!processing && (
+            <>
+              {/* Selected file preview */}
+              {selectedFile && previewUrl ? (
+                <div className="mb-6 space-y-3 animate-fade-in">
+                  <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center">
+                    {fileKind === 'image' ? (
+                      <img src={previewUrl} alt="preview" className="max-w-full max-h-full object-contain" />
+                    ) : (
+                      <video src={previewUrl} controls className="w-full h-full object-contain" />
+                    )}
+                    <button
+                      onClick={clearFile}
+                      className="absolute top-2 right-2 p-1.5 bg-black/60 hover:bg-black/80 rounded-full text-white transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="bg-accent rounded-lg p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {fileKind === 'image'
+                        ? <Image className="w-4 h-4 text-primary flex-shrink-0" />
+                        : <Film className="w-4 h-4 text-primary flex-shrink-0" />
+                      }
+                      <span className="text-sm font-medium truncate">{selectedFile.name}</span>
+                      <span className="text-xs bg-primary/10 text-primary rounded px-1.5 py-0.5 flex-shrink-0 uppercase">
+                        {fileKind}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0 ml-2">
+                      {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* Drop zone */
+                <div
+                  className={`border-2 border-dashed rounded-xl p-12 text-center transition-all cursor-pointer mb-6 ${
+                    dragOver ? 'border-primary bg-primary/5 scale-[1.02]' : 'border-border hover:border-primary/50 hover:bg-accent/30'
+                  }`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div className={`flex justify-center gap-3 mb-4 transition-colors ${dragOver ? 'text-primary' : 'text-muted-foreground/40'}`}>
+                    <Image className="w-12 h-12" />
+                    <Film className="w-12 h-12" />
+                  </div>
+                  <p className="font-semibold mb-1">Kéo thả ảnh hoặc video vào đây</p>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Ảnh: JPG, PNG, WEBP &nbsp;|&nbsp; Video: MP4, AVI, MOV, MKV (tối đa 500MB)
+                  </p>
+                  <Button size="sm" variant="outline" className="rounded-full pointer-events-none">
+                    <Upload className="w-4 h-4 mr-1" /> Chọn file
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/bmp,image/gif,image/webp,video/*"
+                    className="hidden"
+                    onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
+                  />
                 </div>
               )}
 
-              <div className="mt-6 text-center">
-                <Button onClick={handleUpload} disabled={!selectedFile} className="rounded-full px-8" size="lg">
-                  <CloudUpload className="w-4 h-4 mr-2" /> Upload Video
-                </Button>
+              {/* Confidence threshold toggle */}
+              <div className="mb-4">
+                <button
+                  onClick={() => setShowConf(v => !v)}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Settings2 className="w-4 h-4" />
+                  Cài đặt nâng cao
+                </button>
+                {showConf && (
+                  <div className="mt-3 bg-accent/40 rounded-xl p-4 animate-fade-in">
+                    <label className="text-sm font-medium mb-1 block">
+                      Ngưỡng tin cậy (conf): <strong>{conf}</strong>
+                    </label>
+                    <input
+                      type="range" min={0.05} max={0.95} step={0.05}
+                      value={conf}
+                      onChange={e => setConf(Number(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                      <span>0.05 (nhạy hơn)</span>
+                      <span>0.95 (chính xác hơn)</span>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              <Button
+                onClick={handleUpload}
+                disabled={!selectedFile}
+                className="w-full h-12 rounded-xl font-semibold bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary transition-all"
+                size="lg"
+              >
+                <CloudUpload className="w-5 h-5 mr-2" />
+                {selectedFile
+                  ? `Phân tích "${selectedFile.name}"`
+                  : 'Chọn ảnh hoặc video để upload'}
+              </Button>
             </>
           )}
         </div>
