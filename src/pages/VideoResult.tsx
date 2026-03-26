@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,13 +30,82 @@ const VideoResult = () => {
   const [confThreshold, setConfThreshold] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [selectedLabel, setSelectedLabel] = useState<string>('all');
+  // Index of the detection card the user clicked (null = show full annotated result)
+  const [focusedDet, setFocusedDet] = useState<number | null>(null);
+  const imgRef  = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Close lightbox on Escape key
+  // Close lightbox on Escape key; also clear bbox focus
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightboxOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setLightboxOpen(false); setFocusedDet(null); }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  // Draw bounding box for the focused detection on the canvas overlay
+  const drawBbox = useCallback(() => {
+    if (focusedDet === null || !canvasRef.current || !imgRef.current || !prediction) return;
+    const img    = imgRef.current;
+    const canvas = canvasRef.current;
+    const ctx    = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const det = prediction.detections[focusedDet];
+    if (!det) return;
+    const color = LABEL_COLORS[det.label] || '#6366f1';
+
+    // Match canvas pixel size to the displayed image element
+    canvas.width  = img.clientWidth;
+    canvas.height = img.clientHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Scale pixel coords (original image space → display space)
+    const natW = prediction.image_size?.[0] || img.naturalWidth  || 1;
+    const natH = prediction.image_size?.[1] || img.naturalHeight || 1;
+    const sx = img.clientWidth  / natW;
+    const sy = img.clientHeight / natH;
+
+    const bx = (det.x || 0) * sx;
+    const by = (det.y || 0) * sy;
+    const bw = (det.width  || 0) * sx;
+    const bh = (det.height || 0) * sy;
+
+    // Semi-transparent dark overlay everywhere except the box
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(bx, by, bw, bh);          // punch hole = reveal original under box
+
+    // Glowing border
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 18;
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 3;
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.restore();
+
+    // Label pill
+    const label = det.label.replace(/_/g, ' ');
+    const conf  = (det.confidence * 100).toFixed(1) + '%';
+    const text  = `${label}  ${conf}`;
+    const pad   = 6;
+    ctx.font = 'bold 13px Inter, system-ui, sans-serif';
+    const tw  = ctx.measureText(text).width;
+    const ph  = 22;
+    const px  = bx;
+    const py  = Math.max(0, by - ph - 4);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(px, py, tw + pad * 2, ph, 4);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, px + pad, py + ph - 6);
+  }, [focusedDet, prediction]);
+
+  // Re-draw whenever focusedDet changes or image loads
+  useEffect(() => { drawBbox(); }, [drawBbox]);
 
   useEffect(() => {
     if (!isAuthenticated()) { navigate("/login"); return; }
@@ -160,21 +229,51 @@ const VideoResult = () => {
             <div className="relative bg-black flex items-center justify-center group">
               {isImageResult ? (
                 <>
+                  {/* When a detection is focused: show original image + canvas overlay.
+                      When nothing selected: show the pre-annotated result image. */}
                   <img
-                    src={mediaUrl}
+                    ref={imgRef}
+                    src={focusedDet !== null
+                      ? (prediction.file_url || mediaUrl || '')  // original image
+                      : (mediaUrl || '')                          // YOLO-annotated result
+                    }
                     alt={`YOLO result: ${prediction.name}`}
-                    className="w-full max-h-[520px] object-contain cursor-zoom-in"
-                    onClick={() => setLightboxOpen(true)}
+                    className="w-full max-h-[520px] object-contain"
+                    style={{ cursor: focusedDet !== null ? 'default' : 'zoom-in' }}
+                    onClick={() => { if (focusedDet !== null) setFocusedDet(null); else setLightboxOpen(true); }}
+                    onLoad={drawBbox}
                   />
-                  {/* Zoom hint overlay */}
-                  <div
-                    className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-zoom-in"
-                    onClick={() => setLightboxOpen(true)}
-                  >
-                    <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm">
-                      <ZoomIn className="w-7 h-7 text-white" />
+
+                  {/* Canvas bounding-box overlay (only when a detection is selected) */}
+                  {focusedDet !== null && (
+                    <canvas
+                      ref={canvasRef}
+                      className="absolute inset-0 pointer-events-none"
+                      style={{ width: '100%', height: '100%' }}
+                    />
+                  )}
+
+                  {/* "Click to deselect" hint */}
+                  {focusedDet !== null && (
+                    <button
+                      className="absolute top-2 right-2 z-10 bg-black/60 hover:bg-black/80 text-white text-xs rounded-full px-3 py-1.5 backdrop-blur-sm flex items-center gap-1 transition-all"
+                      onClick={() => setFocusedDet(null)}
+                    >
+                      <X className="w-3 h-3" /> Show all detections
+                    </button>
+                  )}
+
+                  {/* Zoom hint (only when nothing selected) */}
+                  {focusedDet === null && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-zoom-in"
+                      onClick={() => setLightboxOpen(true)}
+                    >
+                      <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm">
+                        <ZoomIn className="w-7 h-7 text-white" />
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </>
               ) : (
                 <video
@@ -334,21 +433,49 @@ const VideoResult = () => {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   {filtered.map((d, i) => {
                     const color = LABEL_COLORS[d.label] || '#6366f1';
+                    // Map filtered index back to original prediction.detections index
+                    const origIdx = prediction.detections.indexOf(d);
+                    const isFocused = focusedDet === origIdx;
                     return (
                       <div
                         key={i}
-                        className="rounded-lg p-3 border transition-all"
-                        style={{ borderColor: `${color}44`, backgroundColor: `${color}11` }}
+                        role={isImageResult ? 'button' : undefined}
+                        tabIndex={isImageResult ? 0 : undefined}
+                        onClick={() => {
+                          if (!isImageResult) return;
+                          setFocusedDet(isFocused ? null : origIdx);
+                          imgRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }}
+                        onKeyDown={(e) => {
+                          if ((e.key === 'Enter' || e.key === ' ') && isImageResult) {
+                            e.preventDefault();
+                            setFocusedDet(isFocused ? null : origIdx);
+                          }
+                        }}
+                        className={`rounded-lg p-3 border transition-all ${isImageResult ? 'cursor-pointer select-none' : ''} ${isFocused ? 'scale-[1.03] shadow-lg' : isImageResult ? 'hover:scale-[1.01]' : ''}`}
+                        style={{
+                          borderColor: isFocused ? color : `${color}44`,
+                          backgroundColor: isFocused ? `${color}22` : `${color}11`,
+                          boxShadow: isFocused ? `0 0 0 2px ${color}, 0 6px 20px ${color}33` : undefined,
+                        }}
                       >
                         <div className="flex items-center justify-between mb-1">
                           <p className="text-sm font-semibold capitalize" style={{ color }}>{d.label}</p>
-                          <span
-                            className="text-xs font-bold px-1.5 py-0.5 rounded-full"
-                            style={{ backgroundColor: `${color}22`, color }}
-                          >
-                            {(d.confidence * 100).toFixed(1)}%
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {isFocused && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse" style={{ backgroundColor: `${color}33`, color }}>
+                                FOCUS
+                              </span>
+                            )}
+                            <span
+                              className="text-xs font-bold px-1.5 py-0.5 rounded-full"
+                              style={{ backgroundColor: `${color}22`, color }}
+                            >
+                              {(d.confidence * 100).toFixed(1)}%
+                            </span>
+                          </div>
                         </div>
+
                         {/* Confidence bar */}
                         <div className="w-full bg-black/10 rounded-full h-1.5 mb-1.5">
                           <div
