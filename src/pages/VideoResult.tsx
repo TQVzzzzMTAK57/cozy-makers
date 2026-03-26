@@ -61,21 +61,45 @@ const VideoResult = () => {
     canvas.height = img.clientHeight;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Scale pixel coords (original image space → display space)
-    const natW = prediction.image_size?.[0] || img.naturalWidth  || 1;
-    const natH = prediction.image_size?.[1] || img.naturalHeight || 1;
-    const sx = img.clientWidth  / natW;
-    const sy = img.clientHeight / natH;
+    // ── Coordinate mapping for `object-contain` images ───────────────────────
+    // `object-contain` scales the image uniformly to fit INSIDE the element
+    // while preserving aspect ratio. This creates letterbox (top/bottom) or
+    // pillarbox (left/right) empty space. We must account for that offset.
+    const natW  = img.naturalWidth  || prediction.image_size?.[0] || 1;
+    const natH  = img.naturalHeight || prediction.image_size?.[1] || 1;
+    const elemW = img.clientWidth;
+    const elemH = img.clientHeight;
 
-    const bx = (det.x || 0) * sx;
-    const by = (det.y || 0) * sy;
-    const bw = (det.width  || 0) * sx;
-    const bh = (det.height || 0) * sy;
+    // Uniform scale so the image fits entirely inside the element
+    const scale = Math.min(elemW / natW, elemH / natH);
 
-    // Semi-transparent dark overlay everywhere except the box
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.clearRect(bx, by, bw, bh);          // punch hole = reveal original under box
+    // Actual rendered image dimensions inside the element
+    const rendW = natW * scale;
+    const rendH = natH * scale;
+
+    // Letterbox / pillarbox offsets (image is centered within the element)
+    const offX = (elemW - rendW) / 2;
+    const offY = (elemH - rendH) / 2;
+
+    // Bounding box in canvas/element space
+    const bx = (det.x      || 0) * scale + offX;
+    const by = (det.y      || 0) * scale + offY;
+    const bw = (det.width  || 0) * scale;
+    const bh = (det.height || 0) * scale;
+
+    // ── Draw overlay clipped to the actual image rect ─────────────────────────
+    ctx.save();
+    // Clip to rendered image area (excludes letterbox / pillarbox)
+    ctx.beginPath();
+    ctx.rect(offX, offY, rendW, rendH);
+    ctx.clip();
+
+    // Dark vignette over entire image area
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(offX, offY, rendW, rendH);
+    // "Punch hole" – reveal original image pixels behind the box
+    ctx.clearRect(bx, by, bw, bh);
+    ctx.restore();
 
     // Glowing border
     ctx.save();
@@ -85,6 +109,7 @@ const VideoResult = () => {
     ctx.lineWidth   = 3;
     ctx.strokeRect(bx, by, bw, bh);
     ctx.restore();
+
 
     // Label pill
     const label = det.label.replace(/_/g, ' ');
