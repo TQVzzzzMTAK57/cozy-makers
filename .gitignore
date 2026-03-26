@@ -41,3 +41,7 @@ server/seadrone.db
 server/seadrone.db-shm
 server/seadrone.db-wal
 server/.migrated
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+server/.env
+.env
