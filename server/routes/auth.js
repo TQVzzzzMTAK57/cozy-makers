@@ -1,19 +1,16 @@
-const router = require('express').Router();
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { db, nextId } = require('../db');
+const router  = require('express').Router();
+const bcrypt  = require('bcryptjs');
+const jwt     = require('jsonwebtoken');
+const { Users } = require('../database');
 
 const SECRET = process.env.JWT_SECRET || 'drowning-detection-secret-key-2024';
 
 function makeToken(user) {
-  const payload = {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    role: user.role || 'user',
+  return jwt.sign({
+    id: user.id, username: user.username,
+    email: user.email, role: user.role || 'user',
     full_name: user.full_name || user.username,
-  };
-  return jwt.sign(payload, SECRET, { expiresIn: '7d' });
+  }, SECRET, { expiresIn: '7d' });
 }
 
 // POST /api/auth/register
@@ -25,25 +22,15 @@ router.post('/register', async (req, res) => {
     if (password.length < 6)
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
 
-    const existing = db.get('users').find(u =>
-      u.username === username.trim().toLowerCase() ||
-      u.email === email.trim().toLowerCase()
-    ).value();
-    if (existing)
+    const uname = username.trim().toLowerCase();
+    const em    = email.trim().toLowerCase();
+
+    if (Users.findByUsername.get(uname) || Users.findByEmail.get(em))
       return res.status(400).json({ message: 'Username or email already exists' });
 
     const hash = await bcrypt.hash(password, 10);
-    const user = {
-      id: nextId('users'),
-      username: username.trim().toLowerCase(),
-      email: email.trim().toLowerCase(),
-      password: hash,
-      role: 'user',
-      is_active: true,
-      full_name: (full_name || username).trim(),
-      created_at: new Date().toISOString(),
-    };
-    db.get('users').push(user).write();
+    const user = Users.create({ username: uname, email: em, password: hash,
+      full_name: (full_name || username).trim(), role: 'user', is_active: 1 });
 
     const token = makeToken(user);
     const { password: _p, ...safe } = user;
@@ -61,12 +48,11 @@ router.post('/login', async (req, res) => {
     if (!username || !password)
       return res.status(400).json({ message: 'Username and password are required' });
 
-    const user = db.get('users').find(u => u.username === username.trim().toLowerCase()).value();
+    const user = Users.findByUsername.get(username.trim().toLowerCase());
     if (!user || !(await bcrypt.compare(password, user.password)))
       return res.status(401).json({ message: 'Invalid username or password' });
-
     if (!user.is_active)
-      return res.status(403).json({ message: 'Your account has been deactivated. Please contact admin.' });
+      return res.status(403).json({ message: 'Account deactivated. Contact admin.' });
 
     const token = makeToken(user);
     const { password: _p, ...safe } = user;
@@ -79,22 +65,21 @@ router.post('/login', async (req, res) => {
 
 // GET /api/auth/me
 router.get('/me', require('../middleware/auth'), (req, res) => {
-  const user = db.get('users').find(u => u.id === req.user.id).value();
+  const user = Users.findById.get(req.user.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
   const { password: _p, ...safe } = user;
   res.json(safe);
 });
 
-// PUT /api/auth/profile — update full_name
+// PUT /api/auth/profile
 router.put('/profile', require('../middleware/auth'), (req, res) => {
   const { full_name } = req.body;
-  db.get('users').find(u => u.id === req.user.id).assign({ full_name }).write();
-  const user = db.get('users').find(u => u.id === req.user.id).value();
+  const user = Users.update(req.user.id, { full_name });
   const { password: _p, ...safe } = user;
   res.json(safe);
 });
 
-// PUT /api/auth/password — change password
+// PUT /api/auth/password
 router.put('/password', require('../middleware/auth'), async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -103,12 +88,12 @@ router.put('/password', require('../middleware/auth'), async (req, res) => {
     if (newPassword.length < 6)
       return res.status(400).json({ message: 'New password must be at least 6 characters' });
 
-    const user = db.get('users').find(u => u.id === req.user.id).value();
+    const user = Users.findById.get(req.user.id);
     if (!(await bcrypt.compare(currentPassword, user.password)))
       return res.status(401).json({ message: 'Current password is incorrect' });
 
     const hash = await bcrypt.hash(newPassword, 10);
-    db.get('users').find(u => u.id === req.user.id).assign({ password: hash }).write();
+    Users.update(req.user.id, { password: hash });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });

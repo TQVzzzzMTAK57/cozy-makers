@@ -35,3 +35,9 @@ detect/*.weights
 # ── Misc ─────────────────────────────────────────────────────────────────────
 user.txt
 server/data.json
+
+# ── SQLite database (user data, auto-generated) ───────────────────────────────
+server/seadrone.db
+server/seadrone.db-shm
+server/seadrone.db-wal
+server/.migrated

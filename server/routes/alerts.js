@@ -1,28 +1,18 @@
 const router = require('express').Router();
-const authMiddleware = require('../middleware/auth');
-const { db, nextId } = require('../db');
+const auth   = require('../middleware/auth');
+const { Alerts } = require('../database');
 
-router.use(authMiddleware);
+router.use(auth);
 
-// GET /api/alerts  — current user's unresolved alerts
+// GET /api/alerts
 router.get('/', (req, res) => {
-  const alerts = db.get('alerts')
-    .filter(a => a.user_id === req.user.id)
-    .orderBy(['created_at'], ['desc'])
-    .value()
-    .map(a => {
-      const drone = db.get('drones').find(d => d.id === a.drone_id).value();
-      return { ...a, drone_name: drone?.name || 'Unknown' };
-    });
-  res.json(alerts);
+  res.json(Alerts.listForUser(req.user.id));
 });
 
 // PUT /api/alerts/:id/resolve
 router.put('/:id/resolve', (req, res) => {
   const alertId = Number(req.params.id);
-  const alert = db.get('alerts').find(a => a.id === alertId && a.user_id === req.user.id).value();
-  if (!alert) return res.status(404).json({ message: 'Alert not found' });
-  db.get('alerts').find(a => a.id === alertId).assign({ resolved: true, resolved_at: new Date().toISOString() }).write();
+  Alerts.acknowledge(alertId);
   res.json({ success: true });
 });
 
