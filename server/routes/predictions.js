@@ -148,6 +148,71 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   }
 });
 
+// POST /api/predictions/compare   — run BOTH models on the same file
+router.post('/compare', upload.single('file'), async (req, res) => {
+  const { droneId, name, conf } = req.body;
+  if (!droneId)  return res.status(400).json({ message: 'droneId is required' });
+  if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+
+  const drone = await Drones.findById(Number(droneId));
+  if (!drone || drone.user_id !== req.user.id)
+    return res.status(403).json({ message: 'Drone not found or access denied' });
+
+  const isImage   = IMAGE_MIMES.has(req.file.mimetype);
+  const inputPath = req.file.path;
+  const ext       = isImage ? path.extname(req.file.originalname).toLowerCase() || '.jpg' : '.mp4';
+  const fileUrl   = `/uploads/${req.file.filename}`;
+  const threshold = parseFloat(conf) || 0.25;
+
+  const outputY11 = path.join(resultsDir, `cmp_yolo11_${uuidv4()}${ext}`);
+  const outputY26 = path.join(resultsDir, `cmp_yolo26_${uuidv4()}${ext}`);
+
+  try {
+    console.log(`🔍 COMPARE: running YOLO11 & YOLO26 in parallel on ${req.file.originalname}`);
+
+    const [det11, det26] = await Promise.all([
+      runDetection(inputPath, outputY11, threshold, 'yolo11'),
+      runDetection(inputPath, outputY26, threshold, 'yolo26'),
+    ]);
+
+    console.log(`✅ YOLO11: ${det11.total_detections} detections in ${det11.elapsed_seconds}s`);
+    console.log(`✅ YOLO26: ${det26.total_detections} detections in ${det26.elapsed_seconds}s`);
+
+    const buildPred = async (det, outputP, modelName) => {
+      const actualFile = path.basename(det.output_path || outputP);
+      return Predictions.create({
+        drone_id:       Number(droneId),
+        user_id:        req.user.id,
+        name:           `[${modelName}] ${name || req.file.originalname}`,
+        media_type:     isImage ? 'image' : 'video',
+        file_url:       fileUrl,
+        result_url:     `/uploads/results/${actualFile}`,
+        has_result:     true,
+        detections:     det.detections     || [],
+        frame_results:  det.frame_results  || [],
+        drone_gps:      det.drone_gps      || null,
+        image_size:     det.image_size     || null,
+        elapsed_seconds: det.elapsed_seconds,
+        uploaded_at:    new Date().toISOString(),
+      });
+    };
+
+    const [pred11, pred26] = await Promise.all([
+      buildPred(det11, outputY11, 'YOLO11'),
+      buildPred(det26, outputY26, 'YOLO26'),
+    ]);
+
+    res.status(201).json({
+      yolo11: pred11,
+      yolo26: pred26,
+    });
+  } catch (err) {
+    console.error('[compare] detection failed:', err.message);
+    try { fs.unlinkSync(inputPath); } catch (_) {}
+    res.status(500).json({ message: `Compare failed: ${err.message}` });
+  }
+});
+
 // POST /api/predictions/:id/feedback
 router.post('/:id/feedback', async (req, res) => {
   try {

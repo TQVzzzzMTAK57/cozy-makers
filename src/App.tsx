@@ -15,6 +15,7 @@ import UserProfile from "./pages/UserProfile";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminUsers from "./pages/AdminUsers";
 import AdminDrones from "./pages/AdminDrones";
+import CompareResult from "./pages/CompareResult";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -36,6 +37,7 @@ const App = () => (
           <Route path="/predictions/:droneId" element={<ProtectedRoute><PredictionHistory /></ProtectedRoute>} />
           <Route path="/upload/:droneId" element={<ProtectedRoute><UploadVideo /></ProtectedRoute>} />
           <Route path="/result/:predictionId" element={<ProtectedRoute><VideoResult /></ProtectedRoute>} />
+          <Route path="/compare" element={<ProtectedRoute><CompareResult /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />
 
           {/* Protected - Admin only */}

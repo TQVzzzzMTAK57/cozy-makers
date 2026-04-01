@@ -186,6 +186,28 @@ export const api = {
     feedback: (id: number, accurate: boolean, comment: string) =>
       request<{ success: boolean }>(`/predictions/${id}/feedback`, { method: 'POST', body: JSON.stringify({ accurate, comment }) }),
     delete: (id: number) => request<{ success: boolean }>(`/predictions/${id}`, { method: 'DELETE' }),
+    compare: (droneId: number, file: File, onProgress?: (pct: number) => void, conf?: number) =>
+      new Promise<{ yolo11: PredictionAPI; yolo26: PredictionAPI }>((resolve, reject) => {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('droneId', String(droneId));
+        fd.append('name', file.name);
+        if (conf !== undefined) fd.append('conf', String(conf));
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${BASE_URL}/predictions/compare`);
+        const token = getToken();
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+        });
+        xhr.addEventListener('load', () => {
+          const data = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+          else reject(new ApiError(data.message || 'Compare failed', xhr.status));
+        });
+        xhr.addEventListener('error', () => reject(new ApiError('Network error', 0)));
+        xhr.send(fd);
+      }),
   },
 
   alerts: {

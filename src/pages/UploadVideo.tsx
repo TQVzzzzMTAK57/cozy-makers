@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Upload, Film, Image, CloudUpload, ChevronLeft, CheckCircle, X, Settings2 } from "lucide-react";
+import { Upload, Film, Image, CloudUpload, ChevronLeft, CheckCircle, X, Settings2, ArrowLeftRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -31,7 +31,7 @@ const UploadVideo = () => {
   const [done, setDone] = useState(false);
   const [conf, setConf] = useState(0.25);
   const [showConf, setShowConf] = useState(false);
-  const [model, setModel] = useState<'yolo11' | 'yolo26'>('yolo11');
+  const [model, setModel] = useState<'yolo11' | 'yolo26' | 'compare'>('yolo11');
 
   if (!isAuthenticated()) { navigate("/login"); return null; }
 
@@ -62,17 +62,31 @@ const UploadVideo = () => {
     setProcessing(true);
     setProgress(0);
     try {
-      await api.predictions.upload(
-        Number(droneId),
-        selectedFile,
-        (pct) => setProgress(Math.min(pct, fileKind === 'image' ? 70 : 85)),
-        conf,
-        model,
-      );
-      setProgress(100);
-      setDone(true);
-      toast({ title: "✅ Phân tích hoàn tất!", description: "YOLO đã phát hiện đối tượng thành công." });
-      setTimeout(() => navigate(`/predictions/${droneId}`), 1500);
+      if (model === 'compare') {
+        // Run both models in parallel → navigate to compare page
+        const result = await api.predictions.compare(
+          Number(droneId),
+          selectedFile,
+          (pct) => setProgress(Math.min(pct, fileKind === 'image' ? 60 : 80)),
+          conf,
+        );
+        setProgress(100);
+        setDone(true);
+        toast({ title: "✅ So sánh hoàn tất!", description: "YOLO11 và YOLO26 đã chạy xong." });
+        setTimeout(() => navigate(`/compare?y11=${result.yolo11.id}&y26=${result.yolo26.id}`), 1200);
+      } else {
+        await api.predictions.upload(
+          Number(droneId),
+          selectedFile,
+          (pct) => setProgress(Math.min(pct, fileKind === 'image' ? 70 : 85)),
+          conf,
+          model,
+        );
+        setProgress(100);
+        setDone(true);
+        toast({ title: "✅ Phân tích hoàn tất!", description: "YOLO đã phát hiện đối tượng thành công." });
+        setTimeout(() => navigate(`/predictions/${droneId}`), 1500);
+      }
     } catch (err: unknown) {
       toast({ title: "Upload thất bại", description: err instanceof Error ? err.message : "Lỗi không xác định", variant: "destructive" });
       setProcessing(false);
@@ -90,12 +104,13 @@ const UploadVideo = () => {
         </Button>
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-primary to-indigo-600 text-white rounded-t-2xl p-8 text-center">
+        <div className={`bg-gradient-to-r ${model === 'compare' ? 'from-violet-600 to-pink-600' : 'from-primary to-indigo-600'} text-white rounded-t-2xl p-8 text-center transition-all`}>
           <CloudUpload className="w-12 h-12 mx-auto mb-3 opacity-90" />
           <h1 className="text-2xl font-bold">Phân tích Ảnh / Video</h1>
           <p className="text-sm opacity-75 mt-1">
-            AI phát hiện người đuối nước • Mô hình hiện tại:{" "}
-            <strong>{model === 'yolo11' ? 'YOLO11 (best4.pt)' : 'YOLO26 (best_yolo26.pt)'}</strong>
+            {model === 'compare'
+              ? <><ArrowLeftRight className="w-4 h-4 inline mr-1" />So sánh <strong>YOLO11</strong> vs <strong>YOLO26</strong> song song</>
+              : <>AI phát hiện người đuối nước • Mô hình: <strong>{model === 'yolo11' ? 'YOLO11 (best4.pt)' : 'YOLO26 (best_yolo26.pt)'}</strong></>}
           </p>
         </div>
 
@@ -223,10 +238,11 @@ const UploadVideo = () => {
                     {/* Model selector */}
                     <div>
                       <label className="text-sm font-medium mb-2 block">Chọn mô hình YOLO</label>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         {([
-                          { key: 'yolo11', label: 'YOLO11', file: 'best4.pt',        desc: 'Nhanh & chính xác' },
-                          { key: 'yolo26', label: 'YOLO26', file: 'best_yolo26.pt',  desc: 'Tối ưu dữ liệu mới' },
+                          { key: 'yolo11',   label: 'YOLO11',      file: 'best4.pt',       desc: 'Nhanh & chính xác',   color: 'border-blue-400 bg-blue-50' },
+                          { key: 'yolo26',   label: 'YOLO26',      file: 'best_yolo26.pt', desc: 'Tối ưu dữ liệu mới',  color: 'border-purple-400 bg-purple-50' },
+                          { key: 'compare',  label: 'So sánh cả 2', file: 'YOLO11 + YOLO26', desc: 'Chạy song song',    color: 'border-pink-400 bg-pink-50' },
                         ] as const).map(m => (
                           <button
                             key={m.key}
@@ -234,16 +250,25 @@ const UploadVideo = () => {
                             onClick={() => setModel(m.key)}
                             className={`rounded-xl border-2 p-3 text-left transition-all ${
                               model === m.key
-                                ? 'border-primary bg-primary/5'
+                                ? m.color + ' ring-2 ring-offset-1 ring-primary/40'
                                 : 'border-border hover:border-primary/40'
                             }`}
                           >
+                            {m.key === 'compare' && <ArrowLeftRight className="w-3.5 h-3.5 text-pink-500 mb-1" />}
                             <p className="font-semibold text-sm">{m.label}</p>
-                            <p className="text-xs text-muted-foreground">{m.file}</p>
-                            <p className="text-xs text-primary mt-0.5">{m.desc}</p>
+                            <p className="text-xs text-muted-foreground leading-tight">{m.file}</p>
+                            <p className={`text-xs mt-0.5 ${
+                              m.key === 'compare' ? 'text-pink-600' : 'text-primary'
+                            }`}>{m.desc}</p>
                           </button>
                         ))}
                       </div>
+                      {model === 'compare' && (
+                        <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                          <ArrowLeftRight className="w-3 h-3" />
+                          Cả 2 mô hình sẽ chạy đồng thời. Kết quả hiển thị side-by-side để so sánh.
+                        </p>
+                      )}
                     </div>
 
                     {/* Confidence threshold */}
@@ -270,13 +295,17 @@ const UploadVideo = () => {
               <Button
                 onClick={handleUpload}
                 disabled={!selectedFile}
-                className="w-full h-12 rounded-xl font-semibold bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary transition-all"
+                className={`w-full h-12 rounded-xl font-semibold transition-all ${
+                  model === 'compare'
+                    ? 'bg-gradient-to-r from-violet-600 to-pink-600 hover:from-pink-600 hover:to-violet-600 text-white'
+                    : 'bg-gradient-to-r from-primary to-indigo-600 hover:from-indigo-600 hover:to-primary text-white'
+                }`}
                 size="lg"
               >
-                <CloudUpload className="w-5 h-5 mr-2" />
-                {selectedFile
-                  ? `Phân tích "${selectedFile.name}"`
-                  : 'Chọn ảnh hoặc video để upload'}
+                {model === 'compare'
+                  ? <><ArrowLeftRight className="w-5 h-5 mr-2" />{selectedFile ? `So sánh "${selectedFile.name}"` : 'Chọn file để so sánh'}</>
+                  : <><CloudUpload className="w-5 h-5 mr-2" />{selectedFile ? `Phân tích "${selectedFile.name}"` : 'Chọn ảnh hoặc video để upload'}</>
+                }
               </Button>
             </>
           )}
