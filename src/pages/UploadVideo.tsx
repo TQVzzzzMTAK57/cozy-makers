@@ -31,6 +31,7 @@ const UploadVideo = () => {
   const [done, setDone] = useState(false);
   const [conf, setConf] = useState(0.25);
   const [showConf, setShowConf] = useState(false);
+  const [model, setModel] = useState<'yolo11' | 'yolo26'>('yolo11');
 
   if (!isAuthenticated()) { navigate("/login"); return null; }
 
@@ -66,6 +67,7 @@ const UploadVideo = () => {
         selectedFile,
         (pct) => setProgress(Math.min(pct, fileKind === 'image' ? 70 : 85)),
         conf,
+        model,
       );
       setProgress(100);
       setDone(true);
@@ -91,7 +93,10 @@ const UploadVideo = () => {
         <div className="bg-gradient-to-r from-primary to-indigo-600 text-white rounded-t-2xl p-8 text-center">
           <CloudUpload className="w-12 h-12 mx-auto mb-3 opacity-90" />
           <h1 className="text-2xl font-bold">Phân tích Ảnh / Video</h1>
-          <p className="text-sm opacity-75 mt-1">AI sẽ phát hiện người đuối nước bằng mô hình <strong>best4.pt</strong></p>
+          <p className="text-sm opacity-75 mt-1">
+            AI phát hiện người đuối nước • Mô hình hiện tại:{" "}
+            <strong>{model === 'yolo11' ? 'YOLO11 (best4.pt)' : 'YOLO26 (best_yolo26.pt)'}</strong>
+          </p>
         </div>
 
         <div className="bg-card rounded-b-2xl border border-t-0 shadow-sm p-8">
@@ -203,7 +208,7 @@ const UploadVideo = () => {
                 </div>
               )}
 
-              {/* Confidence threshold toggle */}
+              {/* Advanced settings */}
               <div className="mb-4">
                 <button
                   onClick={() => setShowConf(v => !v)}
@@ -213,20 +218,51 @@ const UploadVideo = () => {
                   Cài đặt nâng cao
                 </button>
                 {showConf && (
-                  <div className="mt-3 bg-accent/40 rounded-xl p-4 animate-fade-in">
-                    <label className="text-sm font-medium mb-1 block">
-                      Ngưỡng tin cậy (conf): <strong>{conf}</strong>
-                    </label>
-                    <input
-                      type="range" min={0.05} max={0.95} step={0.05}
-                      value={conf}
-                      onChange={e => setConf(Number(e.target.value))}
-                      className="w-full accent-primary"
-                    />
-                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                      <span>0.05 (nhạy hơn)</span>
-                      <span>0.95 (chính xác hơn)</span>
+                  <div className="mt-3 bg-accent/40 rounded-xl p-4 animate-fade-in space-y-4">
+
+                    {/* Model selector */}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Chọn mô hình YOLO</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          { key: 'yolo11', label: 'YOLO11', file: 'best4.pt',        desc: 'Nhanh & chính xác' },
+                          { key: 'yolo26', label: 'YOLO26', file: 'best_yolo26.pt',  desc: 'Tối ưu dữ liệu mới' },
+                        ] as const).map(m => (
+                          <button
+                            key={m.key}
+                            type="button"
+                            onClick={() => setModel(m.key)}
+                            className={`rounded-xl border-2 p-3 text-left transition-all ${
+                              model === m.key
+                                ? 'border-primary bg-primary/5'
+                                : 'border-border hover:border-primary/40'
+                            }`}
+                          >
+                            <p className="font-semibold text-sm">{m.label}</p>
+                            <p className="text-xs text-muted-foreground">{m.file}</p>
+                            <p className="text-xs text-primary mt-0.5">{m.desc}</p>
+                          </button>
+                        ))}
+                      </div>
                     </div>
+
+                    {/* Confidence threshold */}
+                    <div>
+                      <label className="text-sm font-medium mb-1 block">
+                        Ngưỡng tin cậy (conf): <strong>{conf}</strong>
+                      </label>
+                      <input
+                        type="range" min={0.05} max={0.95} step={0.05}
+                        value={conf}
+                        onChange={e => setConf(Number(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                        <span>0.05 (nhạy hơn)</span>
+                        <span>0.95 (chính xác hơn)</span>
+                      </div>
+                    </div>
+
                   </div>
                 )}
               </div>

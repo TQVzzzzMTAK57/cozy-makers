@@ -22,17 +22,23 @@ except ImportError as e:
     print(json.dumps({"error": f"Missing dependency: {e}"}))
     sys.exit(1)
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "best4.pt")
+DETECT_DIR  = os.path.dirname(__file__)
+MODEL_FILES = {
+    "yolo11":  "best4.pt",
+    "yolo26":  "best_yolo26.pt",
+}
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 
 
-def load_model():
-    if not os.path.exists(MODEL_PATH):
-        print(json.dumps({"error": f"Model not found: {MODEL_PATH}"}))
+def load_model(model_key="yolo11"):
+    filename  = MODEL_FILES.get(model_key, MODEL_FILES["yolo11"])
+    model_path = os.path.join(DETECT_DIR, filename)
+    if not os.path.exists(model_path):
+        print(json.dumps({"error": f"Model not found: {model_path}"}))
         sys.exit(1)
-    return YOLO(MODEL_PATH)
+    return YOLO(model_path)
 
 
 # ── GPS helpers ────────────────────────────────────────────────────────────────
@@ -300,18 +306,21 @@ def detect_video(model, input_path: str, output_path: str, conf: float):
 
 # ── main ───────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(description="YOLOv8 detect with best4.pt")
-    parser.add_argument("--input",  required=True, help="Path to input file")
-    parser.add_argument("--output", required=True, help="Path to output file")
+    parser = argparse.ArgumentParser(description="YOLO detect – supports YOLO11 and YOLO26")
+    parser.add_argument("--input",  required=True,  help="Path to input file")
+    parser.add_argument("--output", required=True,  help="Path to output file")
     parser.add_argument("--conf",   type=float, default=0.25, help="Confidence threshold")
+    parser.add_argument("--model",  default="yolo11",
+                        choices=list(MODEL_FILES.keys()),
+                        help="Model to use: yolo11 (best4.pt) or yolo26 (best_yolo26.pt)")
     args = parser.parse_args()
 
     if not os.path.exists(args.input):
         print(json.dumps({"error": f"Input file not found: {args.input}"}))
         sys.exit(1)
 
-    ext = os.path.splitext(args.input)[1].lower()
-    model = load_model()
+    ext   = os.path.splitext(args.input)[1].lower()
+    model = load_model(args.model)
 
     t0 = time.time()
     if ext in IMAGE_EXTS:

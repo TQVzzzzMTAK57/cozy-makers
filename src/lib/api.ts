@@ -160,13 +160,14 @@ export const api = {
   predictions: {
     list: (droneId: number) => request<PredictionAPI[]>(`/predictions?droneId=${droneId}`),
     get: (id: number) => request<PredictionAPI>(`/predictions/${id}`),
-    upload: (droneId: number, file: File, onProgress?: (pct: number) => void, conf?: number) =>
+    upload: (droneId: number, file: File, onProgress?: (pct: number) => void, conf?: number, model?: string) =>
       new Promise<PredictionAPI>((resolve, reject) => {
         const fd = new FormData();
-        fd.append('file', file);           // backend now accepts 'file'
+        fd.append('file', file);
         fd.append('droneId', String(droneId));
         fd.append('name', file.name);
-        if (conf !== undefined) fd.append('conf', String(conf));
+        if (conf  !== undefined) fd.append('conf',  String(conf));
+        if (model !== undefined) fd.append('model', model);
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${BASE_URL}/predictions/upload`);
         const token = getToken();

@@ -27,7 +27,12 @@ const Landing = () => {
             Applying artificial intelligence to detect individuals at sea
           </p>
           <p className="text-sm opacity-60">
-            built by <span className="underline">Group</span> with the expertise of <span className="underline">Dr. Truong Vu</span>.
+            built by{" "}
+            <a href="https://github.com/TQVzzzzMTAK57" target="_blank" rel="noopener noreferrer"
+               className="underline font-semibold hover:opacity-80 transition-opacity">
+              Viet Tran Quoc
+            </a>{" "}
+            with the expertise of <span className="underline">Dr. Truong Vu</span>.
           </p>
         </div>
       </section>
@@ -158,14 +163,14 @@ const Landing = () => {
         )}
 
         {activeTab === "Get Started" && (
-          <div className="animate-fade-in max-w-2xl mx-auto text-center">
-            <h2 className="text-3xl font-bold mb-4">Get Started</h2>
+          <div className="animate-fade-in max-w-2xl mx-auto">
+            <h2 className="text-3xl font-bold mb-4 text-center">Get Started</h2>
             <div className="w-16 h-1 bg-primary rounded mb-8 mx-auto" />
-            <p className="text-muted-foreground text-lg mb-8">
-              Ready to enhance your sea rescue operations with AI? 
+            <p className="text-muted-foreground text-lg mb-8 text-center">
+              Ready to enhance your sea rescue operations with AI?
               Sign up now and start connecting your drones.
             </p>
-            <div className="flex gap-4 justify-center">
+            <div className="flex gap-4 justify-center mb-10">
               <Button asChild size="lg" className="rounded-full px-8">
                 <Link to="/login">
                   <Rocket className="w-4 h-4 mr-2" />
@@ -178,6 +183,36 @@ const Landing = () => {
                   Register
                 </Link>
               </Button>
+            </div>
+
+            {/* Contact card */}
+            <div className="bg-card border rounded-2xl p-6 shadow-sm space-y-3">
+              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                <span className="text-2xl">📬</span> Liên hệ
+              </h3>
+              <div className="space-y-2 text-sm">
+                <p className="flex items-center gap-2">
+                  <span>📍</span>
+                  <span>236 Hoàng Quốc Việt, Nghĩa Đô, Hà Nội</span>
+                </p>
+                <p className="flex items-center gap-2">
+                  <span>📞</span>
+                  <a href="tel:0866658746" className="hover:text-primary transition-colors">0866 658 746</a>
+                </p>
+                <p className="flex items-center gap-2">
+                  <span>✉️</span>
+                  <a href="mailto:viet.storage.mta@gmail.com" className="hover:text-primary transition-colors">
+                    viet.storage.mta@gmail.com
+                  </a>
+                </p>
+                <p className="flex items-center gap-2">
+                  <span>🐙</span>
+                  <a href="https://github.com/TQVzzzzMTAK57" target="_blank" rel="noopener noreferrer"
+                     className="hover:text-primary transition-colors font-medium">
+                    github.com/TQVzzzzMTAK57
+                  </a>
+                </p>
+              </div>
             </div>
           </div>
         )}
@@ -196,11 +231,12 @@ const Landing = () => {
               </p>
             </div>
             <div>
-              <h3 className="font-bold text-lg mb-4">Contact Us</h3>
+              <h3 className="font-bold text-lg mb-4">Contact</h3>
               <div className="space-y-2 text-sm text-muted-foreground">
-                <p>📍 AI Lab, University of Technology - Hanoi, Vietnam</p>
-                <p>📞 +84 123 456 789</p>
-                <p>✉️ ai.detection@university.edu</p>
+                <p>📍 236 Hoàng Quốc Việt, Nghĩa Đô, Hà Nội</p>
+                <p>📞 <a href="tel:0866658746" className="hover:text-foreground transition-colors">0866 658 746</a></p>
+                <p>✉️ <a href="mailto:viet.storage.mta@gmail.com" className="hover:text-foreground transition-colors">viet.storage.mta@gmail.com</a></p>
+                <p>🐙 <a href="https://github.com/TQVzzzzMTAK57" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">github.com/TQVzzzzMTAK57</a></p>
               </div>
             </div>
           </div>

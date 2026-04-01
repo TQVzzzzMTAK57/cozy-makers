@@ -30,9 +30,15 @@ const upload = multer({
 
 const DETECT_SCRIPT = path.resolve(__dirname, '../../detect/detect.py');
 
-function runDetection(inputPath, outputPath, conf = 0.25) {
+function runDetection(inputPath, outputPath, conf = 0.25, model = 'yolo11') {
   return new Promise((resolve, reject) => {
-    const proc = spawn('python', [DETECT_SCRIPT, '--input', inputPath, '--output', outputPath, '--conf', String(conf)]);
+    const proc = spawn('python', [
+      DETECT_SCRIPT,
+      '--input',  inputPath,
+      '--output', outputPath,
+      '--conf',   String(conf),
+      '--model',  model,
+    ]);
     let stdout = '', stderr = '';
     proc.stdout.on('data', d => { stdout += d.toString(); });
     proc.stderr.on('data', d => { stderr += d.toString(); });
@@ -78,7 +84,8 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/predictions/upload
 router.post('/upload', upload.single('file'), async (req, res) => {
-  const { droneId, name, conf } = req.body;
+  const { droneId, name, conf, model } = req.body;
+  const modelKey = ['yolo11','yolo26'].includes(model) ? model : 'yolo11';
   if (!droneId)  return res.status(400).json({ message: 'droneId is required' });
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
@@ -93,8 +100,8 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   const fileUrl    = `/uploads/${req.file.filename}`;
 
   try {
-    console.log(`🔍 Running detection: ${req.file.originalname}`);
-    const detection = await runDetection(inputPath, outputPath, parseFloat(conf) || 0.25);
+    console.log(`🔍 Running detection [${modelKey.toUpperCase()}]: ${req.file.originalname}`);
+    const detection = await runDetection(inputPath, outputPath, parseFloat(conf) || 0.25, modelKey);
     console.log(`✅ Done in ${detection.elapsed_seconds}s – ${detection.total_detections} detections`);
 
     const actualFilename = path.basename(detection.output_path || outputPath);
