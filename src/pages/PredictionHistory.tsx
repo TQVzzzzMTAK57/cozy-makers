@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Plus, Eye, Trash2, AlertCircle, Film, ChevronLeft, Clock, SlidersHorizontal } from "lucide-react";
+import { Plus, Eye, Trash2, AlertCircle, Film, Image, ChevronLeft, Clock, SlidersHorizontal } from "lucide-react";
 import { isAuthenticated } from "@/lib/auth";
 import { api, type PredictionAPI, type DroneAPI } from "@/lib/api";
 import AppHeader from "@/components/AppHeader";
@@ -173,7 +173,7 @@ const PredictionHistory = () => {
                 <TableHeader>
                   <TableRow className="bg-secondary/50">
                     <TableHead className="w-12">No.</TableHead>
-                    <TableHead>Video Name</TableHead>
+                    <TableHead>Name</TableHead>
                     <TableHead>Uploaded At</TableHead>
                     <TableHead>Preview</TableHead>
                     <TableHead>Detections</TableHead>
@@ -186,7 +186,10 @@ const PredictionHistory = () => {
                       <TableCell className="font-medium text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Film className="w-4 h-4 text-primary flex-shrink-0" />
+                          {p.media_type === 'image'
+                            ? <Image className="w-4 h-4 text-primary flex-shrink-0" />
+                            : <Film className="w-4 h-4 text-primary flex-shrink-0" />
+                          }
                           <span className="font-medium text-sm truncate max-w-[200px]">{p.name}</span>
                         </div>
                       </TableCell>
@@ -194,17 +197,35 @@ const PredictionHistory = () => {
                         <span className="text-sm text-muted-foreground">{formatDate(p.uploaded_at)}</span>
                       </TableCell>
                       <TableCell>
-                        {p.video_url ? (
-                          <video
-                            src={p.video_url}
-                            className="w-28 h-16 object-cover rounded-lg bg-black"
-                            muted
-                          />
-                        ) : (
-                          <div className="w-28 h-16 bg-muted rounded-lg flex items-center justify-center">
-                            <Film className="w-6 h-6 text-muted-foreground/50" />
-                          </div>
-                        )}
+                        {(() => {
+                          // Prefer annotated result, fall back to original upload
+                          const thumbUrl = p.result_url || p.file_url || p.video_url;
+                          if (!thumbUrl) {
+                            return (
+                              <div className="w-28 h-16 bg-muted rounded-lg flex items-center justify-center">
+                                <Film className="w-6 h-6 text-muted-foreground/50" />
+                              </div>
+                            );
+                          }
+                          if (p.media_type === 'video') {
+                            return (
+                              <video
+                                src={thumbUrl}
+                                className="w-28 h-16 object-cover rounded-lg bg-black"
+                                muted
+                                preload="metadata"
+                              />
+                            );
+                          }
+                          return (
+                            <img
+                              src={thumbUrl}
+                              alt={p.name}
+                              loading="lazy"
+                              className="w-28 h-16 object-cover rounded-lg bg-muted"
+                            />
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>
                         {p.has_result && p.detections.length > 0 ? (
