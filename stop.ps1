@@ -2,6 +2,20 @@
 # stop.ps1 - Tat AI Drowning Detection
 # ============================================
 
+$rootDir = $PSScriptRoot
+$pidFile = Join-Path $rootDir ".run.pids"
+
+# Chi tat process dang chiem dung cong cua du an (khong dung toi cac app node khac)
+function Stop-PortOwner([int]$port) {
+    $owners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique |
+        Where-Object { $_ -gt 0 }
+    foreach ($procId in $owners) {
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    }
+    return @($owners)
+}
+
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Red
 Write-Host "   AI Drowning Detection - Dung he thong       " -ForegroundColor Red
@@ -10,50 +24,42 @@ Write-Host ""
 
 $stopped = $false
 
-# --- Tat Backend: node.exe (port 3001) ---
-Write-Host "[1/2] Dang tat Backend (node.js, port 3001)..." -ForegroundColor Yellow
-
-$nodeProcs = Get-Process -Name "node" -ErrorAction SilentlyContinue
-if ($nodeProcs) {
-    $nodeProcs | Stop-Process -Force -ErrorAction SilentlyContinue
-    Write-Host "      OK - Da tat $($nodeProcs.Count) process node.js" -ForegroundColor Green
+# --- Tat Backend (port 3001) ---
+Write-Host "[1/3] Dang tat Backend (port 3001)..." -ForegroundColor Yellow
+$backendPids = Stop-PortOwner 3001
+if ($backendPids.Count -gt 0) {
+    Write-Host "      OK - Da tat Backend (PID: $($backendPids -join ', '))" -ForegroundColor Green
     $stopped = $true
 } else {
-    Write-Host "      (Khong co process node.js nao dang chay)" -ForegroundColor Gray
+    Write-Host "      (Khong co process nao tren port 3001)" -ForegroundColor Gray
 }
 
-# --- Tat Frontend: Vite (port 5173) ---
-Write-Host "[2/2] Dang tat Frontend (Vite, port 5173)..." -ForegroundColor Yellow
-
-# Tim process dang chiem port 5173
-$port5173 = netstat -ano | Select-String ":5173" | ForEach-Object {
-    ($_ -split '\s+')[-1]
-} | Sort-Object -Unique | Where-Object { $_ -match '^\d+$' }
-
-if ($port5173) {
-    foreach ($pid in $port5173) {
-        try {
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-        } catch {}
-    }
-    Write-Host "      OK - Da tat Vite (PID: $($port5173 -join ', '))" -ForegroundColor Green
+# --- Tat Frontend (port 5173) ---
+Write-Host "[2/3] Dang tat Frontend (Vite, port 5173)..." -ForegroundColor Yellow
+$frontendPids = Stop-PortOwner 5173
+if ($frontendPids.Count -gt 0) {
+    Write-Host "      OK - Da tat Vite (PID: $($frontendPids -join ', '))" -ForegroundColor Green
     $stopped = $true
 } else {
     Write-Host "      (Khong co process nao tren port 5173)" -ForegroundColor Gray
 }
 
-# --- Tat cac cua so PowerShell con (neu co) ---
-$childWindows = Get-Process -Name "powershell" -ErrorAction SilentlyContinue |
-    Where-Object { $_.Id -ne $PID }
-
-if ($childWindows) {
-    Write-Host "" 
-    Write-Host "Tim thay $($childWindows.Count) cua so PowerShell con." -ForegroundColor Yellow
-    $confirm = Read-Host "   Ban co muon dong cac cua so do khong? (y/N)"
-    if ($confirm -eq 'y' -or $confirm -eq 'Y') {
-        $childWindows | Stop-Process -Force -ErrorAction SilentlyContinue
-        Write-Host "   Da dong cac cua so PowerShell con." -ForegroundColor Green
+# --- Dong cac cua so PowerShell do start.ps1 mo ---
+Write-Host "[3/3] Dong cac cua so do start.ps1 mo..." -ForegroundColor Yellow
+if (Test-Path $pidFile) {
+    foreach ($line in Get-Content $pidFile) {
+        $windowId = 0
+        if (-not [int]::TryParse($line, [ref]$windowId)) { continue }
+        $proc = Get-Process -Id $windowId -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -eq "powershell") {
+            Stop-Process -Id $windowId -Force -ErrorAction SilentlyContinue
+            $stopped = $true
+        }
     }
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
+    Write-Host "      OK" -ForegroundColor Green
+} else {
+    Write-Host "      (Khong tim thay .run.pids)" -ForegroundColor Gray
 }
 
 Write-Host ""

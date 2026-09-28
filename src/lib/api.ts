@@ -1,5 +1,8 @@
 const BASE_URL = '/api';
 
+// Videos are loaded straight from the backend: Vite's proxy can drop Range headers needed for seeking
+export const BACKEND_URL: string = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+
 export function getToken(): string | null {
   return localStorage.getItem('dd_token');
 }
@@ -9,6 +12,15 @@ export function setToken(token: string) {
 export function clearAuth() {
   localStorage.removeItem('dd_token');
   localStorage.removeItem('dd_user');
+}
+
+// /uploads is private; <img>/<video>/download links cannot send headers, so the token goes in the query
+export function mediaUrl(url: string | null | undefined, { direct = false } = {}): string {
+  if (!url) return '';
+  if (/^https?:\/\//.test(url)) return url;
+  const base = direct ? `${BACKEND_URL}${url}` : url;
+  const token = getToken();
+  return token ? `${base}${base.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : base;
 }
 
 export class ApiError extends Error {

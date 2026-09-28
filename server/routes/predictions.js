@@ -68,6 +68,41 @@ function runDetection(inputPath, outputPath, conf = 0.25, model = 'yolo11') {
   });
 }
 
+// Labels that raise an alert, and the minimum confidence. Override in .env, e.g.
+//   ALERT_LABELS=drowning,swimmer   ALERT_MIN_CONFIDENCE=0.7
+const ALERT_LABELS = new Set(
+  (process.env.ALERT_LABELS || 'drowning,drown,person_distress,swimmer,person')
+    .split(',').map(l => l.trim().toLowerCase()).filter(Boolean)
+);
+const ALERT_MIN_CONFIDENCE = Number(process.env.ALERT_MIN_CONFIDENCE) || 0.60;
+
+// Creates at most one alert for the most confident dangerous detection across the given results.
+// Runs after predictions are saved, so a failure here is logged but never fails the request.
+async function createAutoAlert(results, drone, userId) {
+  try {
+    let best = null;
+    for (const { prediction, detections, model } of results) {
+      for (const d of detections || []) {
+        if (!ALERT_LABELS.has(String(d.label).toLowerCase()) || d.confidence < ALERT_MIN_CONFIDENCE) continue;
+        if (!best || d.confidence > best.det.confidence) best = { det: d, prediction, model };
+      }
+    }
+    if (!best) return;
+    const { det, prediction, model } = best;
+    const alert = await Alerts.create({
+      prediction_id: prediction.id,
+      drone_id:      drone.id,
+      user_id:       userId,
+      label:         det.label,
+      confidence:    det.confidence,
+      message:       `[${drone.name}]${model ? ` [${model}]` : ''} ${det.label} detected with ${(det.confidence * 100).toFixed(0)}% confidence`,
+    });
+    console.log(`🚨 ALERT: ${alert.message}`);
+  } catch (err) {
+    console.error('[alert] creation failed:', err.message);
+  }
+}
+
 function removeFiles(...paths) {
   paths.filter(Boolean).forEach(fp => { try { fs.unlinkSync(fp); } catch (_) {} });
 }
@@ -180,25 +215,7 @@ router.post('/upload', uploadSingle('file'), async (req, res) => {
       uploaded_at:    new Date().toISOString(),
     });
 
-    // Auto-alert – the prediction is already saved, so an alert failure must not fail the upload
-    try {
-      const DANGEROUS = new Set(['drowning','drown','person_distress','swimmer','person']);
-      const dangerous = detections.filter(d => DANGEROUS.has(d.label.toLowerCase()) && d.confidence >= 0.60);
-      if (dangerous.length > 0) {
-        const top = dangerous.sort((a, b) => b.confidence - a.confidence)[0];
-        const alert = await Alerts.create({
-          prediction_id: prediction.id,
-          drone_id:      Number(droneId),
-          user_id:       req.user.id,
-          label:         top.label,
-          confidence:    top.confidence,
-          message:       `[${drone.name}] ${top.label} detected with ${(top.confidence * 100).toFixed(0)}% confidence`,
-        });
-        console.log(`🚨 ALERT: ${alert.message}`);
-      }
-    } catch (err) {
-      console.error('[upload] alert creation failed:', err.message);
-    }
+    await createAutoAlert([{ prediction, detections }], drone, req.user.id);
 
     res.status(201).json(prediction);
   } catch (err) {
@@ -271,6 +288,11 @@ router.post('/compare', uploadSingle('file'), async (req, res) => {
       buildPred(det11, outputY11, 'YOLO11'),
       buildPred(det26, outputY26, 'YOLO26'),
     ]);
+
+    await createAutoAlert([
+      { prediction: pred11, detections: pred11.detections, model: 'YOLO11' },
+      { prediction: pred26, detections: pred26.detections, model: 'YOLO26' },
+    ], drone, req.user.id);
 
     res.status(201).json({
       yolo11: pred11,

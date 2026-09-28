@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Download, Upload, ThumbsUp, ThumbsDown, ChevronLeft, Target, CheckCircle, Clock, SlidersHorizontal, ZoomIn, X, Maximize2, MapPin, Navigation, ExternalLink, Satellite } from "lucide-react";
-import { api, type PredictionAPI } from "@/lib/api";
+import { api, mediaUrl as toMediaUrl, type PredictionAPI } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import AppFooter from "@/components/AppFooter";
@@ -163,8 +163,7 @@ const VideoResult = () => {
   const handleDownload = () => {
     const raw = prediction?.result_url || prediction?.file_url || prediction?.video_url;
     if (!raw) return;
-    const BACKEND = 'http://localhost:3001';
-    const url = raw.startsWith('http') ? raw : `${BACKEND}${raw}`;
+    const url = toMediaUrl(raw, { direct: true });
     const a = document.createElement('a');
     a.href = url;
     a.download = `result_${prediction!.name}`;
@@ -174,17 +173,9 @@ const VideoResult = () => {
   const rawMediaUrl = prediction?.result_url || prediction?.file_url || prediction?.video_url;
   const isImageResult = prediction?.media_type === 'image';
 
-  // For video, use absolute URL pointing directly to the backend to ensure
-  // HTTP Range Requests (needed for seeking/streaming) work correctly.
-  // Vite's proxy can drop the Accept-Ranges / Content-Range headers.
-  const BACKEND = 'http://localhost:3001';
-  const mediaUrl = rawMediaUrl
-    ? (isImageResult
-        ? rawMediaUrl                          // image: proxy is fine
-        : rawMediaUrl.startsWith('http')
-          ? rawMediaUrl
-          : `${BACKEND}${rawMediaUrl}`)        // video: direct to backend
-    : null;
+  // Images go through the Vite proxy; videos load straight from the backend so Range requests
+  // (needed for seeking) keep working. Both carry the auth token since /uploads is private.
+  const mediaUrl = rawMediaUrl ? toMediaUrl(rawMediaUrl, { direct: !isImageResult }) : null;
 
   if (loading) {
     return (
@@ -259,7 +250,7 @@ const VideoResult = () => {
                   <img
                     ref={imgRef}
                     src={focusedDet !== null
-                      ? (prediction.file_url || mediaUrl || '')  // original image
+                      ? (toMediaUrl(prediction.file_url) || mediaUrl || '')  // original image
                       : (mediaUrl || '')                          // YOLO-annotated result
                     }
                     alt={`YOLO result: ${prediction.name}`}

@@ -3,7 +3,8 @@ const express = require('express');
 const cors    = require('cors');
 const path    = require('path');
 const fs      = require('fs');
-const { bootstrap } = require('./database');
+const { bootstrap, Predictions } = require('./database');
+const { authenticate } = require('./middleware/auth');
 
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -15,7 +16,21 @@ app.use(cors({
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
 }));
 app.use(express.json());
-app.use('/uploads', express.static(uploadsDir, {
+// Uploaded media is private: only the owner of the prediction (or an admin) may fetch it
+async function canAccessUpload(req, res, next) {
+  try {
+    const url = '/uploads' + decodeURIComponent(req.path);
+    if (req.user.role === 'admin') return next();
+    const owners = await Predictions.ownersOfUrl(url);
+    if (!owners.includes(req.user.id)) return res.status(404).json({ message: 'Not found' });
+    next();
+  } catch (err) {
+    console.error('Upload access check failed:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+}
+
+app.use('/uploads', authenticate({ allowQueryToken: true }), canAccessUpload, express.static(uploadsDir, {
   acceptRanges: true,
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('.avi')) res.setHeader('Content-Type', 'video/x-msvideo');

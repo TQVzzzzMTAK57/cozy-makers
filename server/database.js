@@ -14,6 +14,7 @@ const { Pool, types } = require('pg');
 // Return NUMERIC columns (elapsed_seconds, confidence) as JS numbers instead of strings
 types.setTypeParser(types.builtins.NUMERIC, v => (v === null ? null : parseFloat(v)));
 const bcrypt   = require('bcryptjs');
+const crypto   = require('crypto');
 
 // ── Connection pool ───────────────────────────────────────────────────────────
 const pool = new Pool({
@@ -130,23 +131,25 @@ async function bootstrap() {
   // Older databases were created without 'idle' (must run outside the multi-statement block)
   await pool.query("ALTER TYPE drone_status ADD VALUE IF NOT EXISTS 'idle'");
 
-  // Seed default accounts if table is empty
+  // Seed default accounts if table is empty.
+  // Admin password comes from ADMIN_PASSWORD, otherwise a random one is generated and printed once.
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM users');
   if (n === 0) {
-    const now = new Date().toISOString();
-    await pool.query(
-      `INSERT INTO users (username, email, password, full_name, role, is_active, created_at)
-       VALUES ($1,$2,$3,$4,'admin',true,$5)`,
-      ['admin', 'admin@seadrone.ai', bcrypt.hashSync('Admin@123', 10), 'System Administrator', now]
-    );
-    await pool.query(
-      `INSERT INTO users (username, email, password, full_name, role, is_active, created_at)
-       VALUES ($1,$2,$3,$4,'user',true,$5)`,
-      ['user1', 'user1@test.com', bcrypt.hashSync('User@123', 10), 'Demo User', now]
-    );
-    console.log('\n📦 Seeded default accounts:');
-    console.log('  👑 Admin : admin  / Admin@123');
-    console.log('  👤 User  : user1  / User@123\n');
+    const adminPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
+    await Users.create({
+      username: 'admin', email: 'admin@seadrone.ai', password: bcrypt.hashSync(adminPassword, 10),
+      full_name: 'System Administrator', role: 'admin', is_active: true,
+    });
+    console.log('\n📦 Seeded admin account:');
+    console.log(`  👑 admin / ${process.env.ADMIN_PASSWORD ? '(ADMIN_PASSWORD from .env)' : adminPassword}`);
+    if (process.env.DEMO_USER_PASSWORD) {
+      await Users.create({
+        username: 'user1', email: 'user1@test.com', password: bcrypt.hashSync(process.env.DEMO_USER_PASSWORD, 10),
+        full_name: 'Demo User', role: 'user', is_active: true,
+      });
+      console.log('  👤 user1 / (DEMO_USER_PASSWORD from .env)');
+    }
+    console.log('');
   }
 
   // Ensure at least one admin
@@ -321,6 +324,13 @@ const Predictions = {
 
   async delete(id) {
     return pool.query('DELETE FROM predictions WHERE id=$1', [id]);
+  },
+
+  async ownersOfUrl(url) {
+    const rows = await query(
+      'SELECT DISTINCT user_id FROM predictions WHERE file_url=$1 OR result_url=$1', [url]
+    );
+    return rows.map(r => r.user_id);
   },
 
   // Compare mode stores two predictions pointing at the same uploaded file

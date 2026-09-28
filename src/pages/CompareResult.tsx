@@ -2,12 +2,11 @@ import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, Clock, Target, Layers, Trophy, ArrowLeftRight } from "lucide-react";
-import { api, type PredictionAPI } from "@/lib/api";
+import { api, mediaUrl, type PredictionAPI } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
 import AppFooter from "@/components/AppFooter";
 
-const SERVER = "http://localhost:3001";
-const img = (url?: string | null) => url ? `${SERVER}${url}` : "";
+const img = (url?: string | null) => mediaUrl(url, { direct: true });
 
 const CompareResult = () => {
   const navigate = useNavigate();

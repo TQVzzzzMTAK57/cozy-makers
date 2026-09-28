@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Plus, Eye, Trash2, AlertCircle, Film, Image, ChevronLeft, Clock, SlidersHorizontal } from "lucide-react";
 import { isAuthenticated } from "@/lib/auth";
-import { api, type PredictionAPI, type DroneAPI } from "@/lib/api";
+import { api, mediaUrl, type PredictionAPI, type DroneAPI } from "@/lib/api";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 import { useToast } from "@/hooks/use-toast";
@@ -199,7 +199,7 @@ const PredictionHistory = () => {
                       <TableCell>
                         {(() => {
                           // Prefer annotated result, fall back to original upload
-                          const thumbUrl = p.result_url || p.file_url || p.video_url;
+                          const thumbUrl = mediaUrl(p.result_url || p.file_url || p.video_url, { direct: p.media_type === 'video' });
                           if (!thumbUrl) {
                             return (
                               <div className="w-28 h-16 bg-muted rounded-lg flex items-center justify-center">
