@@ -43,7 +43,7 @@ Write-Host ""
 Write-Host "   Frontend  :  http://localhost:5173"          -ForegroundColor Cyan
 Write-Host "   Backend   :  http://localhost:3001/api/health" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "   Tai khoan : admin / 123456 (admin)" -ForegroundColor White
+Write-Host "   Tai khoan : admin / Admin@123 (admin)" -ForegroundColor White
 Write-Host ""
 
 # Mo trinh duyet

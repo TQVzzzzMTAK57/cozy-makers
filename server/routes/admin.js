@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const auth   = require('../middleware/auth');
 const admin  = require('../middleware/admin');
-const { pool, query, queryOne, Users, Drones, Predictions, Alerts } = require('../database');
+const { pool, query, Users, Predictions, Alerts } = require('../database');
+const { droneToResponse } = require('../drone-status');
 
 router.use(auth, admin);
 
@@ -21,6 +22,7 @@ router.get('/stats', async (req, res) => {
         SELECT
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE status='active')::int       AS active_count,
+          COUNT(*) FILTER (WHERE status='idle')::int         AS idle_count,
           COUNT(*) FILTER (WHERE status='inactive')::int     AS inactive_count,
           COUNT(*) FILTER (WHERE status='maintenance')::int  AS maintenance_count
         FROM drones
@@ -53,7 +55,7 @@ router.get('/stats', async (req, res) => {
 
     res.json({
       users:       { total: u.total, admins: u.admins, active: u.active, inactive: u.inactive },
-      drones:      { total: d.total, byStatus: { active: d.active_count, inactive: d.inactive_count, maintenance: d.maintenance_count } },
+      drones:      { total: d.total, byStatus: { Active: d.active_count, Idle: d.idle_count, Offline: d.inactive_count, Maintenance: d.maintenance_count } },
       predictions: { total: p.total, withFeedback: p.with_feedback },
       alerts:      { total: a.total, unresolved: a.unresolved },
       recentActivity,
@@ -137,7 +139,7 @@ router.get('/drones', async (req, res) => {
              (SELECT COUNT(*)::int FROM predictions WHERE drone_id=d.id) AS prediction_count
       FROM drones d JOIN users u ON u.id=d.user_id ORDER BY d.id DESC
     `);
-    res.json(rows);
+    res.json(rows.map(droneToResponse));
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
 

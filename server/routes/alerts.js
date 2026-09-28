@@ -11,7 +11,8 @@ router.get('/', async (req, res) => {
 
 router.put('/:id/resolve', async (req, res) => {
   try {
-    await Alerts.acknowledge(Number(req.params.id));
+    const ok = await Alerts.acknowledgeForUser(Number(req.params.id), req.user.id);
+    if (!ok) return res.status(404).json({ message: 'Alert not found' });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });

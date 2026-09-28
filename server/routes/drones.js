@@ -1,26 +1,9 @@
 const router = require('express').Router();
 const auth   = require('../middleware/auth');
 const { Drones } = require('../database');
+const { toDbStatus, droneToResponse: toResponse } = require('../drone-status');
 
 router.use(auth);
-
-// Map UI labels → PostgreSQL ENUM values
-const STATUS_MAP = {
-  idle:        'active',
-  active:      'active',
-  maintenance: 'maintenance',
-  offline:     'inactive',
-  inactive:    'inactive',
-};
-const normalizeStatus = (s) => STATUS_MAP[(s || 'active').toLowerCase()] || 'active';
-
-// Map DB row → frontend field names
-const toResponse = (d) => d ? ({
-  ...d,
-  serial_number:    d.serial_num,
-  firmware_version: d.firmware,
-  // keep status as-is (lowercase from DB is fine for display)
-}) : null;
 
 router.get('/', async (req, res) => {
   try { res.json((await Drones.listForUser(req.user.id)).map(toResponse)); }
@@ -46,12 +29,12 @@ router.post('/', async (req, res) => {
       serial_num: serialNumber    || null,
       model:      model           || null,
       firmware:   firmwareVersion || null,
-      status:     normalizeStatus(status),
+      status:     toDbStatus(status),
     });
     res.status(201).json(toResponse(drone));
   } catch (err) {
     console.error('Create drone error:', err.message);
-    res.status(500).json({ message: 'Server error: ' + err.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
@@ -68,12 +51,12 @@ router.put('/:id', async (req, res) => {
       serial_num: serialNumber    ?? drone.serial_num,
       model:      model           ?? drone.model,
       firmware:   firmwareVersion ?? drone.firmware,
-      status:     status ? normalizeStatus(status) : drone.status,
+      status:     status ? toDbStatus(status) : drone.status,
     });
     res.json(toResponse(updated));
   } catch (err) {
     console.error('Update drone error:', err.message);
-    res.status(500).json({ message: 'Server error: ' + err.message });
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

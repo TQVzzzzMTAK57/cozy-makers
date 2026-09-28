@@ -9,7 +9,10 @@
  */
 
 require('dotenv').config();
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// Return NUMERIC columns (elapsed_seconds, confidence) as JS numbers instead of strings
+types.setTypeParser(types.builtins.NUMERIC, v => (v === null ? null : parseFloat(v)));
 const bcrypt   = require('bcryptjs');
 
 // ── Connection pool ───────────────────────────────────────────────────────────
@@ -48,7 +51,7 @@ async function bootstrap() {
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
     DO $$ BEGIN
-      CREATE TYPE drone_status AS ENUM ('active', 'inactive', 'maintenance');
+      CREATE TYPE drone_status AS ENUM ('active', 'idle', 'inactive', 'maintenance');
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
     DO $$ BEGIN
@@ -123,6 +126,9 @@ async function bootstrap() {
     CREATE INDEX IF NOT EXISTS idx_alerts_ack         ON alerts(acknowledged) WHERE acknowledged = FALSE;
     CREATE INDEX IF NOT EXISTS idx_detections_gin     ON predictions USING GIN (detections);
   `);
+
+  // Older databases were created without 'idle' (must run outside the multi-statement block)
+  await pool.query("ALTER TYPE drone_status ADD VALUE IF NOT EXISTS 'idle'");
 
   // Seed default accounts if table is empty
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM users');
@@ -316,6 +322,14 @@ const Predictions = {
   async delete(id) {
     return pool.query('DELETE FROM predictions WHERE id=$1', [id]);
   },
+
+  // Compare mode stores two predictions pointing at the same uploaded file
+  async countByUrl(url) {
+    const row = await queryOne(
+      'SELECT COUNT(*)::int AS n FROM predictions WHERE file_url=$1 OR result_url=$1', [url]
+    );
+    return row.n;
+  },
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -352,6 +366,14 @@ const Alerts = {
 
   async acknowledge(id) {
     return pool.query('UPDATE alerts SET acknowledged=true WHERE id=$1', [id]);
+  },
+
+  // Returns false if the alert does not exist or belongs to another user
+  async acknowledgeForUser(id, userId) {
+    const { rowCount } = await pool.query(
+      'UPDATE alerts SET acknowledged=true WHERE id=$1 AND user_id=$2', [id, userId]
+    );
+    return rowCount > 0;
   },
 };
 

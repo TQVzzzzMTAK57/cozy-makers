@@ -2,15 +2,14 @@ const router  = require('express').Router();
 const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const { Users } = require('../database');
-
-const SECRET = process.env.JWT_SECRET || 'drowning-detection-secret-key-2024';
+const { JWT_SECRET } = require('../config');
 
 function makeToken(user) {
   return jwt.sign({
     id: user.id, username: user.username,
     email: user.email, role: user.role,
     full_name: user.full_name || user.username,
-  }, SECRET, { expiresIn: '7d' });
+  }, JWT_SECRET, { expiresIn: '7d' });
 }
 
 // POST /api/auth/register

@@ -12,11 +12,11 @@ DO $$ BEGIN CREATE TYPE user_role AS ENUM ('admin', 'user');
 EXCEPTION
 WHEN duplicate_object THEN NULL;
 END $$;
-DO $$ BEGIN CREATE TYPE drone_status AS ENUM ('active', 'inactive', 'maintenance');
+DO $$ BEGIN CREATE TYPE drone_status AS ENUM ('active', 'idle', 'inactive', 'maintenance');
 EXCEPTION
 WHEN duplicate_object THEN NULL;
 END $$;
-DO $$ BEGIN CREATE TYPE media_type AS ENUM ('image', 'video');
+DO $$ BEGIN CREATE TYPE media_type_enum AS ENUM ('image', 'video');
 EXCEPTION
 WHEN duplicate_object THEN NULL;
 END $$;
@@ -47,14 +47,14 @@ CREATE TABLE drones (
 );
 COMMENT ON TABLE drones IS 'Drone fleet belonging to users';
 COMMENT ON COLUMN drones.user_id IS 'Owner of this drone';
-COMMENT ON COLUMN drones.status IS 'active | inactive | maintenance';
+COMMENT ON COLUMN drones.status IS 'active | idle | inactive (Offline) | maintenance';
 -- ── 3. predictions ────────────────────────────────────────────────────────────
 CREATE TABLE predictions (
   id SERIAL PRIMARY KEY,
   drone_id INTEGER NOT NULL REFERENCES drones(id) ON DELETE CASCADE,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name VARCHAR(200),
-  media_type media_type NOT NULL DEFAULT 'image',
+  media_type media_type_enum NOT NULL DEFAULT 'image',
   file_url TEXT,
   -- original uploaded file path
   result_url TEXT,
@@ -111,17 +111,9 @@ WHERE acknowledged = FALSE;
 -- GIN index for JSONB querying (e.g. filter by label inside detections)
 CREATE INDEX idx_detections_gin ON predictions USING GIN (detections);
 CREATE INDEX idx_drone_gps_gin ON predictions USING GIN (drone_gps);
--- ── Seed data (optional – comment out if not needed) ──────────────────────────
--- Default admin account  (password: Admin@123)
-INSERT INTO users (username, email, password, full_name, role)
-VALUES (
-    'admin',
-    'admin@seadrone.ai',
-    '$2a$10$placeholder_bcrypt_hash_here',
-    -- replace with real bcrypt hash
-    'System Administrator',
-    'admin'
-  ) ON CONFLICT (username) DO NOTHING;
+-- ── Seed data ────────────────────────────────────────────────────────────────
+-- Default accounts are created by the backend on first start (server/database.js)
+-- when the users table is empty, with properly hashed passwords.
 -- ── Verification query ────────────────────────────────────────────────────────
 SELECT table_name,
   (

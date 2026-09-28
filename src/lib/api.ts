@@ -34,6 +34,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+// Error pages from proxies/servers may not be JSON – never let parsing throw inside XHR callbacks
+function parseJson(text: string): { message?: string } & Record<string, unknown> {
+  try { return JSON.parse(text); } catch { return {}; }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface User {
   id: number;
@@ -115,13 +120,13 @@ export interface AlertAPI {
   prediction_id: number;
   drone_id: number;
   user_id: number;
-  type: string;
-  severity: 'HIGH' | 'CRITICAL';
+  label: string;
+  confidence: number;
   message: string;
-  resolved: boolean;
+  acknowledged: boolean;
   created_at: string;
-  resolved_at: string | null;
   drone_name?: string;
+  prediction_name?: string;
   username?: string;
 }
 
@@ -176,8 +181,8 @@ export const api = {
           if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
         });
         xhr.addEventListener('load', () => {
-          const data = JSON.parse(xhr.responseText);
-          if (xhr.status >= 200 && xhr.status < 300) resolve(data as PredictionAPI);
+          const data = parseJson(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data as unknown as PredictionAPI);
           else reject(new ApiError(data.message || 'Upload failed', xhr.status));
         });
         xhr.addEventListener('error', () => reject(new ApiError('Network error', 0)));
@@ -201,8 +206,8 @@ export const api = {
           if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
         });
         xhr.addEventListener('load', () => {
-          const data = JSON.parse(xhr.responseText);
-          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+          const data = parseJson(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data as unknown as { yolo11: PredictionAPI; yolo26: PredictionAPI });
           else reject(new ApiError(data.message || 'Compare failed', xhr.status));
         });
         xhr.addEventListener('error', () => reject(new ApiError('Network error', 0)));

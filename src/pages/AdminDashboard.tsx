@@ -11,6 +11,9 @@ import { useToast } from "@/hooks/use-toast";
 import AppHeader from "@/components/AppHeader";
 import AppFooter from "@/components/AppFooter";
 
+// Alerts are only created at ≥60% confidence; highlight the most certain ones in red
+const CRITICAL_CONFIDENCE = 0.85;
+
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -26,7 +29,7 @@ const AdminDashboard = () => {
         api.admin.alerts.list(),
       ]);
       setStats(statsData);
-      setAlerts(alertsData.filter(a => !a.resolved).slice(0, 6));
+      setAlerts(alertsData.filter(a => !a.acknowledged).slice(0, 6));
     } catch {
       toast({ title: "Error", description: "Failed to load admin data", variant: "destructive" });
     } finally {
@@ -40,9 +43,13 @@ const AdminDashboard = () => {
   }, [navigate, load]);
 
   const handleResolveAlert = async (id: number) => {
-    await api.admin.alerts.resolve(id);
-    setAlerts(prev => prev.filter(a => a.id !== id));
-    toast({ title: "Alert resolved" });
+    try {
+      await api.admin.alerts.resolve(id);
+      setAlerts(prev => prev.filter(a => a.id !== id));
+      toast({ title: "Alert resolved" });
+    } catch {
+      toast({ title: "Error", description: "Failed to resolve alert", variant: "destructive" });
+    }
   };
 
   const formatDate = (str: string) => {
@@ -151,7 +158,7 @@ const AdminDashboard = () => {
                       <div
                         key={alert.id}
                         className={`flex items-start justify-between gap-2 p-3 rounded-lg border text-sm ${
-                          alert.severity === 'CRITICAL' ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200'
+                          alert.confidence >= CRITICAL_CONFIDENCE ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200'
                         }`}
                       >
                         <div className="flex-1 min-w-0">

@@ -28,30 +28,81 @@ const upload = multer({
   },
 });
 
-const DETECT_SCRIPT = path.resolve(__dirname, '../../detect/detect.py');
+const DETECT_SCRIPT     = path.resolve(__dirname, '../../detect/detect.py');
+const PYTHON_BIN        = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
+const DETECT_TIMEOUT_MS = Number(process.env.DETECT_TIMEOUT_MS) || 30 * 60 * 1000;
+
+// detect.py prints a single JSON object on its last "{"-line, including on failure ({"error": ...})
+function parseDetectOutput(stdout) {
+  const lines = stdout.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
+  if (!lines.length) return null;
+  try { return JSON.parse(lines[lines.length - 1]); } catch { return null; }
+}
 
 function runDetection(inputPath, outputPath, conf = 0.25, model = 'yolo11') {
   return new Promise((resolve, reject) => {
-    const proc = spawn('python', [
+    const proc = spawn(PYTHON_BIN, [
       DETECT_SCRIPT,
       '--input',  inputPath,
       '--output', outputPath,
       '--conf',   String(conf),
       '--model',  model,
     ]);
-    let stdout = '', stderr = '';
+    let stdout = '', stderr = '', timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; proc.kill(); }, DETECT_TIMEOUT_MS);
     proc.stdout.on('data', d => { stdout += d.toString(); });
     proc.stderr.on('data', d => { stderr += d.toString(); });
+    proc.on('error', err => { clearTimeout(timer); reject(new Error(`Cannot start ${PYTHON_BIN}: ${err.message}`)); });
     proc.on('close', code => {
-      if (code !== 0) { console.error('[detect stderr]', stderr.slice(-500)); return reject(new Error(`Detection exited ${code}`)); }
-      try {
-        const lines = stdout.split('\n').map(l => l.trim()).filter(l => l.startsWith('{'));
-        const parsed = JSON.parse(lines[lines.length - 1]);
-        if (parsed.error) return reject(new Error(parsed.error));
-        resolve(parsed);
-      } catch { reject(new Error('Failed to parse detection output')); }
+      clearTimeout(timer);
+      if (timedOut) return reject(new Error(`Detection timed out after ${Math.round(DETECT_TIMEOUT_MS / 1000)}s`));
+      const parsed = parseDetectOutput(stdout);
+      if (code !== 0) {
+        console.error('[detect stderr]', stderr.slice(-500));
+        return reject(new Error(parsed?.error || `Detection exited ${code}`));
+      }
+      if (!parsed) return reject(new Error('Failed to parse detection output'));
+      if (parsed.error) return reject(new Error(parsed.error));
+      resolve(parsed);
     });
   });
+}
+
+function removeFiles(...paths) {
+  paths.filter(Boolean).forEach(fp => { try { fs.unlinkSync(fp); } catch (_) {} });
+}
+
+// Result files may get a different extension than requested (e.g. .avi fallback)
+function detectionOutputFiles(det, requestedPath) {
+  return [requestedPath, det?.output_path].filter(Boolean);
+}
+
+// Multer errors (wrong type, too large) → JSON 400 instead of Express's HTML error page
+function uploadSingle(field) {
+  const mw = upload.single(field);
+  return (req, res, next) => mw(req, res, err => {
+    if (!err) return next();
+    const message = err.code === 'LIMIT_FILE_SIZE' ? 'File too large (max 500MB)' : err.message;
+    res.status(400).json({ message });
+  });
+}
+
+// Validates droneId from the form body and checks ownership; removes the upload on rejection
+async function requireOwnedDrone(req, res) {
+  const droneId = Number(req.body.droneId);
+  if (!req.file) { res.status(400).json({ message: 'No file uploaded' }); return null; }
+  if (!Number.isInteger(droneId) || droneId <= 0) {
+    removeFiles(req.file.path);
+    res.status(400).json({ message: 'droneId is required' });
+    return null;
+  }
+  const drone = await Drones.findById(droneId);
+  if (!drone || drone.user_id !== req.user.id) {
+    removeFiles(req.file.path);
+    res.status(403).json({ message: 'Drone not found or access denied' });
+    return null;
+  }
+  return drone;
 }
 
 // GET /api/predictions?droneId=X
@@ -83,15 +134,19 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/predictions/upload
-router.post('/upload', upload.single('file'), async (req, res) => {
+router.post('/upload', uploadSingle('file'), async (req, res) => {
   const { droneId, name, conf, model } = req.body;
   const modelKey = ['yolo11','yolo26'].includes(model) ? model : 'yolo11';
-  if (!droneId)  return res.status(400).json({ message: 'droneId is required' });
-  if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-  const drone = await Drones.findById(Number(droneId));
-  if (!drone || drone.user_id !== req.user.id)
-    return res.status(403).json({ message: 'Drone not found or access denied' });
+  let drone;
+  try {
+    drone = await requireOwnedDrone(req, res);
+  } catch (err) {
+    console.error('[upload] drone lookup failed:', err.message);
+    removeFiles(req.file?.path);
+    return res.status(500).json({ message: 'Server error' });
+  }
+  if (!drone) return;
 
   const isImage    = IMAGE_MIMES.has(req.file.mimetype);
   const inputPath  = req.file.path;
@@ -99,9 +154,10 @@ router.post('/upload', upload.single('file'), async (req, res) => {
   const outputPath = path.join(resultsDir, `result_${uuidv4()}${ext}`);
   const fileUrl    = `/uploads/${req.file.filename}`;
 
+  let detection;
   try {
     console.log(`🔍 Running detection [${modelKey.toUpperCase()}]: ${req.file.originalname}`);
-    const detection = await runDetection(inputPath, outputPath, parseFloat(conf) || 0.25, modelKey);
+    detection = await runDetection(inputPath, outputPath, parseFloat(conf) || 0.25, modelKey);
     console.log(`✅ Done in ${detection.elapsed_seconds}s – ${detection.total_detections} detections`);
 
     const actualFilename = path.basename(detection.output_path || outputPath);
@@ -124,39 +180,47 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       uploaded_at:    new Date().toISOString(),
     });
 
-    // Auto-alert
-    const DANGEROUS = new Set(['drowning','drown','person_distress','swimmer','person']);
-    const dangerous = detections.filter(d => DANGEROUS.has(d.label.toLowerCase()) && d.confidence >= 0.60);
-    if (dangerous.length > 0) {
-      const top = dangerous.sort((a, b) => b.confidence - a.confidence)[0];
-      const alert = await Alerts.create({
-        prediction_id: prediction.id,
-        drone_id:      Number(droneId),
-        user_id:       req.user.id,
-        label:         top.label,
-        confidence:    top.confidence,
-        message:       `[${drone.name}] ${top.label} detected with ${(top.confidence * 100).toFixed(0)}% confidence`,
-      });
-      console.log(`🚨 ALERT: ${alert.message}`);
+    // Auto-alert – the prediction is already saved, so an alert failure must not fail the upload
+    try {
+      const DANGEROUS = new Set(['drowning','drown','person_distress','swimmer','person']);
+      const dangerous = detections.filter(d => DANGEROUS.has(d.label.toLowerCase()) && d.confidence >= 0.60);
+      if (dangerous.length > 0) {
+        const top = dangerous.sort((a, b) => b.confidence - a.confidence)[0];
+        const alert = await Alerts.create({
+          prediction_id: prediction.id,
+          drone_id:      Number(droneId),
+          user_id:       req.user.id,
+          label:         top.label,
+          confidence:    top.confidence,
+          message:       `[${drone.name}] ${top.label} detected with ${(top.confidence * 100).toFixed(0)}% confidence`,
+        });
+        console.log(`🚨 ALERT: ${alert.message}`);
+      }
+    } catch (err) {
+      console.error('[upload] alert creation failed:', err.message);
     }
 
     res.status(201).json(prediction);
   } catch (err) {
     console.error('[upload] detection failed:', err.message);
-    try { fs.unlinkSync(inputPath); } catch (_) {}
+    removeFiles(inputPath, ...detectionOutputFiles(detection, outputPath));
     res.status(500).json({ message: `Detection failed: ${err.message}` });
   }
 });
 
 // POST /api/predictions/compare   — run BOTH models on the same file
-router.post('/compare', upload.single('file'), async (req, res) => {
+router.post('/compare', uploadSingle('file'), async (req, res) => {
   const { droneId, name, conf } = req.body;
-  if (!droneId)  return res.status(400).json({ message: 'droneId is required' });
-  if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
-  const drone = await Drones.findById(Number(droneId));
-  if (!drone || drone.user_id !== req.user.id)
-    return res.status(403).json({ message: 'Drone not found or access denied' });
+  let drone;
+  try {
+    drone = await requireOwnedDrone(req, res);
+  } catch (err) {
+    console.error('[compare] drone lookup failed:', err.message);
+    removeFiles(req.file?.path);
+    return res.status(500).json({ message: 'Server error' });
+  }
+  if (!drone) return;
 
   const isImage   = IMAGE_MIMES.has(req.file.mimetype);
   const inputPath = req.file.path;
@@ -167,13 +231,19 @@ router.post('/compare', upload.single('file'), async (req, res) => {
   const outputY11 = path.join(resultsDir, `cmp_yolo11_${uuidv4()}${ext}`);
   const outputY26 = path.join(resultsDir, `cmp_yolo26_${uuidv4()}${ext}`);
 
+  let det11, det26;
   try {
     console.log(`🔍 COMPARE: running YOLO11 & YOLO26 in parallel on ${req.file.originalname}`);
 
-    const [det11, det26] = await Promise.all([
+    // allSettled so a failure in one model still lets us clean up the other's output
+    const [r11, r26] = await Promise.allSettled([
       runDetection(inputPath, outputY11, threshold, 'yolo11'),
       runDetection(inputPath, outputY26, threshold, 'yolo26'),
     ]);
+    det11 = r11.value;
+    det26 = r26.value;
+    if (r11.status === 'rejected') throw r11.reason;
+    if (r26.status === 'rejected') throw r26.reason;
 
     console.log(`✅ YOLO11: ${det11.total_detections} detections in ${det11.elapsed_seconds}s`);
     console.log(`✅ YOLO26: ${det26.total_detections} detections in ${det26.elapsed_seconds}s`);
@@ -208,7 +278,7 @@ router.post('/compare', upload.single('file'), async (req, res) => {
     });
   } catch (err) {
     console.error('[compare] detection failed:', err.message);
-    try { fs.unlinkSync(inputPath); } catch (_) {}
+    removeFiles(inputPath, ...detectionOutputFiles(det11, outputY11), ...detectionOutputFiles(det26, outputY26));
     res.status(500).json({ message: `Compare failed: ${err.message}` });
   }
 });
@@ -233,11 +303,13 @@ router.delete('/:id', async (req, res) => {
     const p = await Predictions.findById(predId);
     if (!p || p.user_id !== req.user.id)
       return res.status(404).json({ message: 'Prediction not found' });
-    [p.file_url, p.result_url].filter(Boolean).forEach(url => {
-      const fp = path.join(__dirname, '..', url);
-      if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch (_) {} }
-    });
     await Predictions.delete(predId);
+    // Compare mode shares the uploaded file between two predictions – keep it while still referenced
+    for (const url of [p.file_url, p.result_url].filter(Boolean)) {
+      if (await Predictions.countByUrl(url) > 0) continue;
+      const fp = path.resolve(__dirname, '..', '.' + url);
+      if (fp.startsWith(uploadsDir + path.sep)) removeFiles(fp);
+    }
     res.json({ success: true });
   } catch (err) { res.status(500).json({ message: 'Server error' }); }
 });
